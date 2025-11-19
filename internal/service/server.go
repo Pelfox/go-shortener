@@ -65,7 +65,7 @@ func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	http.Redirect(w, r, destinationURL, http.StatusPermanentRedirect)
+	http.Redirect(w, r, destinationURL, http.StatusTemporaryRedirect)
 }
 
 func (s *Server) ServeHTTP() error {
