@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// Тест для создания короткой ссылки
 func TestHandleCreationRequest(t *testing.T) {
 	server := NewServer("localhost:8080")
 
@@ -27,6 +28,7 @@ func TestHandleCreationRequest(t *testing.T) {
 	}
 }
 
+// Тест для случая, когда короткая ссылка найдена в хранилище
 func TestHandleShortRequest(t *testing.T) {
 	server := NewServer("localhost:8080")
 
@@ -44,5 +46,19 @@ func TestHandleShortRequest(t *testing.T) {
 
 	if result.Header.Get("Location") != "https://google.com" {
 		t.Fatalf("expected redirect to %q, got %q", "https://google.com", result.Header.Get("Location"))
+	}
+}
+
+// Тест для случая, когда короткая ссылка не найдена в хранилище
+func TestHandleShortRequestUnknown(t *testing.T) {
+	server := NewServer("localhost:8080")
+
+	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
+	recorder := httptest.NewRecorder()
+	server.mux.ServeHTTP(recorder, req)
+
+	result := recorder.Result()
+	if result.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, result.StatusCode)
 	}
 }
