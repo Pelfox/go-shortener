@@ -18,6 +18,7 @@ func TestHandleCreationRequest(t *testing.T) {
 	server.mux.ServeHTTP(recorder, req)
 
 	result := recorder.Result()
+	defer result.Body.Close()
 	if result.StatusCode != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d", http.StatusCreated, result.StatusCode)
 	}
@@ -40,6 +41,7 @@ func TestHandleShortRequest(t *testing.T) {
 	server.mux.ServeHTTP(recorder, req)
 
 	result := recorder.Result()
+	defer result.Body.Close()
 	if result.StatusCode != http.StatusTemporaryRedirect {
 		t.Fatalf("expected status %d, got %d", http.StatusTemporaryRedirect, result.StatusCode)
 	}
@@ -58,6 +60,7 @@ func TestHandleShortRequestUnknown(t *testing.T) {
 	server.mux.ServeHTTP(recorder, req)
 
 	result := recorder.Result()
+	defer result.Body.Close()
 	if result.StatusCode != http.StatusNotFound {
 		t.Fatalf("expected status %d, got %d", http.StatusNotFound, result.StatusCode)
 	}
