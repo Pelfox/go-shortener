@@ -8,8 +8,8 @@ type AppConfig struct {
 }
 
 func ParseAppConfig() *AppConfig {
-	host := flag.String("a", "localhost:8888", "Адрес, на котором будет запущен HTTP сервер.")
-	urlPrefix := flag.String("b", "http://localhost:8888/", "Префикс для коротких URL.")
+	host := flag.String("a", "localhost:8080", "Адрес, на котором будет запущен HTTP сервер.")
+	urlPrefix := flag.String("b", "http://localhost:8080/", "Префикс для коротких URL.")
 
 	flag.Parse()
 	return &AppConfig{
