@@ -11,17 +11,20 @@ import (
 )
 
 type Server struct {
-	addr    string
+	addr      string
+	urlPrefix string
+
 	router  *chi.Mux
 	storage map[string]string
 }
 
-func NewServer(addr string) *Server {
+func NewServer(addr string, urlPrefix string) *Server {
 	router := chi.NewRouter()
 	server := &Server{
-		addr:    addr,
-		router:  router,
-		storage: make(map[string]string),
+		addr:      addr,
+		urlPrefix: urlPrefix,
+		router:    router,
+		storage:   make(map[string]string),
 	}
 
 	router.Post("/", server.handleCreationRequest)
@@ -50,7 +53,8 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shortID := pkg.GenerateShortID(8)
-	s.storage[shortID] = destinationURL
+	linkSlug := fmt.Sprintf("%s/%s", s.urlPrefix, shortID)
+	s.storage[linkSlug] = destinationURL
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
