@@ -9,7 +9,7 @@ import (
 
 // Тест для создания короткой ссылки
 func TestHandleCreationRequest(t *testing.T) {
-	server := NewServer("localhost:8080")
+	server := NewServer("localhost:8080", "")
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://google.com"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -31,7 +31,7 @@ func TestHandleCreationRequest(t *testing.T) {
 
 // Тест для случая, когда короткая ссылка найдена в хранилище
 func TestHandleShortRequest(t *testing.T) {
-	server := NewServer("localhost:8080")
+	server := NewServer("localhost:8080", "")
 
 	// добавляем фейковую короткую ссылку (mock)
 	server.storage["test1234"] = "https://google.com"
@@ -53,7 +53,7 @@ func TestHandleShortRequest(t *testing.T) {
 
 // Тест для случая, когда короткая ссылка не найдена в хранилище
 func TestHandleShortRequestUnknown(t *testing.T) {
-	server := NewServer("localhost:8080")
+	server := NewServer("localhost:8080", "")
 
 	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 	recorder := httptest.NewRecorder()

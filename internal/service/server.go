@@ -11,21 +11,24 @@ import (
 )
 
 type Server struct {
-	addr    string
+	addr   string
+	prefix string
+
 	router  *chi.Mux
 	storage map[string]string
 }
 
-func NewServer(addr string) *Server {
+func NewServer(addr string, urlPrefix string) *Server {
 	router := chi.NewRouter()
 	server := &Server{
 		addr:    addr,
+		prefix:  urlPrefix[strings.LastIndex(urlPrefix, "/")+1:],
 		router:  router,
 		storage: make(map[string]string),
 	}
 
 	router.Post("/", server.handleCreationRequest)
-	router.Get("/{id}", server.handleShortRequest)
+	router.Get("/*", server.handleShortRequest)
 
 	return server
 }
@@ -50,17 +53,17 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shortID := pkg.GenerateShortID(8)
-	s.storage[shortID] = destinationURL
+	linkSlug := fmt.Sprintf("%s/%s", s.prefix, shortID)
+	s.storage[linkSlug] = destinationURL
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(fmt.Sprintf("http://%s/%s", s.addr, shortID)))
+	w.Write([]byte(fmt.Sprintf("http://%s/%s", s.addr, linkSlug)))
 }
 
 func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
-	params := r.PathValue("id")
-
-	destinationURL, exists := s.storage[params]
+	slug := strings.TrimPrefix(r.URL.Path, "/")
+	destinationURL, exists := s.storage[slug]
 	if !exists {
 		http.Error(w, "Short URL not found.", http.StatusNotFound)
 		return
@@ -70,5 +73,6 @@ func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ServeHTTP() error {
+	fmt.Println("Starting server on", s.addr)
 	return http.ListenAndServe(s.addr, s.router)
 }
