@@ -5,6 +5,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/Pelfox/go-shortener/pkg"
 	"github.com/go-chi/chi/v5"
@@ -16,6 +17,7 @@ type Server struct {
 
 	router  *chi.Mux
 	storage map[string]string
+	mutex   *sync.RWMutex
 }
 
 func NewServer(addr string, urlPrefix string) *Server {
@@ -25,6 +27,7 @@ func NewServer(addr string, urlPrefix string) *Server {
 		prefix:  urlPrefix[strings.LastIndex(urlPrefix, "/")+1:],
 		router:  router,
 		storage: make(map[string]string),
+		mutex:   &sync.RWMutex{},
 	}
 
 	router.Post("/", server.handleCreationRequest)
@@ -53,8 +56,14 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	shortID := pkg.GenerateShortID(8)
-	linkSlug := fmt.Sprintf("%s/%s", s.prefix, shortID)
+	linkSlug := shortID
+	if s.prefix != "" {
+		linkSlug = fmt.Sprintf("%s/%s", s.prefix, shortID)
+	}
+
+	s.mutex.Lock()
 	s.storage[linkSlug] = destinationURL
+	s.mutex.Unlock()
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
@@ -63,7 +72,9 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 	slug := strings.TrimPrefix(r.URL.Path, "/")
+	s.mutex.RLock()
 	destinationURL, exists := s.storage[slug]
+	s.mutex.RUnlock()
 	if !exists {
 		http.Error(w, "Short URL not found.", http.StatusNotFound)
 		return
