@@ -2,17 +2,26 @@ package pkg
 
 import (
 	"math/rand"
+	"sync"
 	"time"
 )
 
 const letters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
+var (
+	rng      = rand.New(rand.NewSource(time.Now().UnixNano()))
+	rngMutex sync.Mutex
+)
+
 // GenerateShortID создаёт псевдослучайную строку заданной длины.
 func GenerateShortID(length int) string {
-	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rngMutex.Lock()
+	defer rngMutex.Unlock()
+
 	result := make([]byte, length)
 	for i := range result {
 		result[i] = letters[rng.Intn(len(letters))]
 	}
+
 	return string(result)
 }
