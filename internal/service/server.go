@@ -7,24 +7,25 @@ import (
 	"strings"
 
 	"github.com/Pelfox/go-shortener/pkg"
+	"github.com/go-chi/chi/v5"
 )
 
 type Server struct {
 	addr    string
-	mux     *http.ServeMux
+	router  *chi.Mux
 	storage map[string]string
 }
 
 func NewServer(addr string) *Server {
-	mux := http.NewServeMux()
+	router := chi.NewRouter()
 	server := &Server{
 		addr:    addr,
-		mux:     mux,
+		router:  router,
 		storage: make(map[string]string),
 	}
 
-	mux.HandleFunc("POST /", server.handleCreationRequest)
-	mux.HandleFunc("GET /{id}", server.handleShortRequest)
+	router.Post("/", server.handleCreationRequest)
+	router.Get("/{id}", server.handleShortRequest)
 
 	return server
 }
@@ -69,5 +70,5 @@ func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ServeHTTP() error {
-	return http.ListenAndServe(s.addr, s.mux)
+	return http.ListenAndServe(s.addr, s.router)
 }

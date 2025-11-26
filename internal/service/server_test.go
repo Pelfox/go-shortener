@@ -15,7 +15,7 @@ func TestHandleCreationRequest(t *testing.T) {
 	req.Header.Set("Content-Type", "text/plain")
 
 	recorder := httptest.NewRecorder()
-	server.mux.ServeHTTP(recorder, req)
+	server.router.ServeHTTP(recorder, req)
 
 	result := recorder.Result()
 	defer result.Body.Close()
@@ -38,7 +38,7 @@ func TestHandleShortRequest(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/test1234", nil)
 	recorder := httptest.NewRecorder()
-	server.mux.ServeHTTP(recorder, req)
+	server.router.ServeHTTP(recorder, req)
 
 	result := recorder.Result()
 	defer result.Body.Close()
@@ -57,7 +57,7 @@ func TestHandleShortRequestUnknown(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 	recorder := httptest.NewRecorder()
-	server.mux.ServeHTTP(recorder, req)
+	server.router.ServeHTTP(recorder, req)
 
 	result := recorder.Result()
 	defer result.Body.Close()
