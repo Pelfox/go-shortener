@@ -7,8 +7,10 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Pelfox/go-shortener/internal/middlewares"
 	"github.com/Pelfox/go-shortener/pkg"
 	"github.com/go-chi/chi/v5"
+	"github.com/rs/zerolog/log"
 )
 
 type Server struct {
@@ -22,6 +24,8 @@ type Server struct {
 
 func NewServer(addr string, urlPrefix string) *Server {
 	router := chi.NewRouter()
+	router.Use(middlewares.LoggerMiddleware)
+
 	server := &Server{
 		addr:    addr,
 		prefix:  urlPrefix[strings.LastIndex(urlPrefix, "/")+1:],
@@ -44,6 +48,7 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
+		log.Error().Err(err).Msg("failed to read body")
 		http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
 		return
 	}
@@ -68,6 +73,10 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(fmt.Sprintf("http://%s/%s", s.addr, linkSlug)))
+
+	log.Info().Str("slug", linkSlug).
+		Str("destination", destinationURL).
+		Msg("created short URL")
 }
 
 func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
@@ -76,6 +85,7 @@ func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 	destinationURL, exists := s.storage[slug]
 	s.mutex.RUnlock()
 	if !exists {
+		log.Warn().Str("slug", slug).Msg("short URL not found")
 		http.Error(w, "Short URL not found.", http.StatusNotFound)
 		return
 	}
@@ -84,6 +94,6 @@ func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) ServeHTTP() error {
-	fmt.Println("Starting server on", s.addr)
+	log.Info().Str("addr", s.addr).Msg("starting server")
 	return http.ListenAndServe(s.addr, s.router)
 }
