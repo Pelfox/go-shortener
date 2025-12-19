@@ -9,7 +9,7 @@ import (
 func main() {
 	appConfig := internal.ParseAppConfig()
 
-	server := service.NewServer(appConfig.Host, appConfig.URLPrefix)
+	server := service.NewServer(appConfig)
 	if err := server.ServeHTTP(); err != nil {
 		log.Fatal().Err(err).Msg("failed to start server")
 	}

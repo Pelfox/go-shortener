@@ -1,14 +1,19 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"os/signal"
 	"strings"
 	"sync"
+	"syscall"
 
+	"github.com/Pelfox/go-shortener/internal"
 	"github.com/Pelfox/go-shortener/internal/middlewares"
 	"github.com/Pelfox/go-shortener/pkg"
 	"github.com/Pelfox/go-shortener/pkg/schemas"
@@ -17,25 +22,27 @@ import (
 )
 
 type Server struct {
-	addr   string
-	prefix string
+	addr     string
+	prefix   string
+	filePath string
 
 	router  *chi.Mux
 	storage map[string]string
 	mutex   *sync.RWMutex
 }
 
-func NewServer(addr string, urlPrefix string) *Server {
+func NewServer(config *internal.AppConfig) *Server {
 	router := chi.NewRouter()
 	router.Use(middlewares.LoggerMiddleware)
 	router.Use(middlewares.CompressMiddleware)
 
 	server := &Server{
-		addr:    addr,
-		prefix:  urlPrefix[strings.LastIndex(urlPrefix, "/")+1:],
-		router:  router,
-		storage: make(map[string]string),
-		mutex:   &sync.RWMutex{},
+		addr:     config.Host,
+		prefix:   config.URLPrefix[strings.LastIndex(config.URLPrefix, "/")+1:],
+		filePath: config.FilePath,
+		router:   router,
+		storage:  make(map[string]string),
+		mutex:    &sync.RWMutex{},
 	}
 
 	router.Post("/", server.handleCreationRequest)
@@ -151,7 +158,71 @@ func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, destinationURL, http.StatusTemporaryRedirect)
 }
 
+func (s *Server) createFileOrLoad() error {
+	file, err := os.OpenFile(
+		s.filePath,
+		os.O_RDWR|os.O_CREATE,
+		0644,
+	)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	data, err := io.ReadAll(file)
+	if err != nil {
+		return err
+	}
+
+	// если файл пустой - игнорируем
+	if len(data) == 0 {
+		return nil
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return json.Unmarshal(data, &s.storage)
+}
+
+func (s *Server) saveStorageToFile() error {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+	data, err := json.Marshal(s.storage)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(s.filePath, data, 0644)
+}
+
 func (s *Server) ServeHTTP() error {
-	log.Info().Str("addr", s.addr).Msg("starting server")
-	return http.ListenAndServe(s.addr, s.router)
+	if err := s.createFileOrLoad(); err != nil {
+		return err
+	}
+
+	server := &http.Server{
+		Addr:    s.addr,
+		Handler: s.router,
+	}
+
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
+
+	go func() {
+		log.Info().Str("addr", s.addr).Msg("starting server")
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Error().Err(err).Msg("caught a server error")
+		}
+	}()
+
+	<-ctx.Done()
+	if err := s.saveStorageToFile(); err != nil {
+		return err
+	}
+
+	return server.Shutdown(context.Background())
 }
