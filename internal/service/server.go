@@ -27,16 +27,17 @@ const maxGenerateAttempts = 5
 // errDestinationEmpty указывает на то, что переданный URL назначения пуст.
 var errDestinationEmpty = errors.New("the destination URL is empty")
 
+// Server реализует основной функционал приложения, а также HTTP-сервер.
 type Server struct {
 	addr    string
 	baseURL string
 
 	router  *chi.Mux
 	storage internal.Storage
-
-	logger zerolog.Logger
+	logger  zerolog.Logger
 }
 
+// NewServer создаёт и настраивает новый экземпляр Server.
 func NewServer(
 	addr string,
 	baseURL string,
@@ -192,6 +193,7 @@ func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 	http.Redirect(w, r, destination, http.StatusTemporaryRedirect)
 }
 
+// ServeHTTP запускает HTTP-сервер и обрабатывает завершение работы.
 func (s *Server) ServeHTTP() error {
 	if err := s.storage.Load(); err != nil {
 		return err

@@ -10,24 +10,35 @@ import (
 )
 
 var (
+	// ErrIDCollision указывает на попытку сохранить короткую ссылку с уже
+	// существующим ID.
 	ErrIDCollision = errors.New("redirect with given ID already exists")
-	ErrNotFound    = errors.New("redirect with given ID not found")
+	// ErrNotFound указывает на то, что короткая ссылка с запрашиваемым ID не найдена.
+	ErrNotFound = errors.New("redirect with given ID not found")
 )
 
+// Storage определяет интерфейс для хранения и получения коротких ссылок.
 type Storage interface {
+	// Store сохраняет короткую ссылку с заданным ID и URL назначения.
 	Store(id string, destination string) error
+	// Get возвращает URL назначения для короткой ссылки с заданным ID.
 	Get(id string) (string, error)
 
+	// Load загружает данные из системы хранения (файл, БД, пр.) в хранилище.
 	Load() error
+	// Save сохраняет данные из хранилища в систему хранения (файл, БД, пр.).
 	Save() error
 }
 
+// InMemoryStorage реализует интерфейс Storage, используя в памяти карту для
+// хранения коротких ссылок.
 type InMemoryStorage struct {
 	mutex     *sync.RWMutex
 	redirects map[string]string // ключ = ID для короткой ссылки, значение = исходная URL
 	filePath  string
 }
 
+// NewInMemoryStorage создаёт новый экземпляр InMemoryStorage.
 func NewInMemoryStorage(filePath string) *InMemoryStorage {
 	return &InMemoryStorage{
 		mutex:     &sync.RWMutex{},
