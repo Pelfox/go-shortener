@@ -18,7 +18,7 @@ import (
 	"github.com/Pelfox/go-shortener/pkg"
 	"github.com/Pelfox/go-shortener/pkg/schemas"
 	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 type Server struct {
@@ -29,11 +29,17 @@ type Server struct {
 	router  *chi.Mux
 	storage map[string]string
 	mutex   *sync.RWMutex
+
+	logger zerolog.Logger
 }
 
-func NewServer(config *internal.AppConfig) *Server {
+func NewServer(
+	config *internal.AppConfig,
+	logger zerolog.Logger,
+	middlewareLogger zerolog.Logger,
+) *Server {
 	router := chi.NewRouter()
-	router.Use(middlewares.LoggerMiddleware)
+	router.Use(middlewares.LoggerMiddleware(middlewareLogger))
 	router.Use(middlewares.CompressMiddleware)
 
 	server := &Server{
@@ -43,6 +49,8 @@ func NewServer(config *internal.AppConfig) *Server {
 		router:   router,
 		storage:  make(map[string]string),
 		mutex:    &sync.RWMutex{},
+
+		logger: logger,
 	}
 
 	router.Post("/", server.handleCreationRequest)
@@ -79,7 +87,7 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to read body")
+		s.logger.Error().Err(err).Msg("failed to read body")
 		http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
 		return
 	}
@@ -95,7 +103,7 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(shortLink))
 
-	log.Info().Str("slug", shortLink).
+	s.logger.Info().Str("slug", shortLink).
 		Str("destination", string(body)).
 		Msg("created short URL")
 }
@@ -108,7 +116,7 @@ func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to read body")
+		s.logger.Error().Err(err).Msg("failed to read body")
 		http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
 		return
 	}
@@ -116,7 +124,7 @@ func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
 
 	var request schemas.CreateShortLink
 	if err := json.Unmarshal(body, &request); err != nil {
-		log.Error().Err(err).Msg("failed to unmarshal JSON")
+		s.logger.Error().Err(err).Msg("failed to unmarshal JSON")
 		http.Error(w, "Invalid JSON body.", http.StatusBadRequest)
 		return
 	}
@@ -130,7 +138,7 @@ func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
 	response := schemas.ShortLinkResponse{Result: shortLink}
 	responseBody, err := json.Marshal(response)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to marshal JSON")
+		s.logger.Error().Err(err).Msg("failed to marshal JSON")
 		http.Error(w, "Failed to create response.", http.StatusInternalServerError)
 		return
 	}
@@ -139,7 +147,7 @@ func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	w.Write(responseBody)
 
-	log.Info().Str("slug", shortLink).
+	s.logger.Info().Str("slug", shortLink).
 		Str("destination", request.URL).
 		Msg("created short URL (via API)")
 }
@@ -150,7 +158,7 @@ func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 	destinationURL, exists := s.storage[slug]
 	s.mutex.RUnlock()
 	if !exists {
-		log.Warn().Str("slug", slug).Msg("short URL not found")
+		s.logger.Warn().Str("slug", slug).Msg("short URL not found")
 		http.Error(w, "Short URL not found.", http.StatusNotFound)
 		return
 	}
@@ -213,9 +221,9 @@ func (s *Server) ServeHTTP() error {
 	defer stop()
 
 	go func() {
-		log.Info().Str("addr", s.addr).Msg("starting server")
+		s.logger.Info().Str("addr", s.addr).Msg("starting server")
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Error().Err(err).Msg("caught a server error")
+			s.logger.Error().Err(err).Msg("caught a server error")
 		}
 	}()
 

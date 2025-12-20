@@ -5,11 +5,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/Pelfox/go-shortener/internal"
 	"github.com/Pelfox/go-shortener/pkg/schemas"
+	"github.com/rs/zerolog"
 )
 
 var testServerConfig = internal.AppConfig{
@@ -17,10 +19,18 @@ var testServerConfig = internal.AppConfig{
 	URLPrefix: "",
 	FilePath:  "urls.json",
 }
+var serverLogger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().
+	Timestamp().
+	Str("component", "server").
+	Logger()
+var middlewareLogger = zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().
+	Timestamp().
+	Str("component", "logger-middleware").
+	Logger()
 
 // Тест для создания короткой ссылки.
 func TestHandleCreationRequest(t *testing.T) {
-	server := NewServer(&testServerConfig)
+	server := NewServer(&testServerConfig, serverLogger, middlewareLogger)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://google.com"))
 	req.Header.Set("Content-Type", "text/plain")
@@ -42,7 +52,7 @@ func TestHandleCreationRequest(t *testing.T) {
 
 // Тест для случая с неверным Content-Type.
 func TestHandleCreationRequest_InvalidContentType(t *testing.T) {
-	server := NewServer(&testServerConfig)
+	server := NewServer(&testServerConfig, serverLogger, middlewareLogger)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://google.com"))
 	req.Header.Set("Content-Type", "application/json")
@@ -57,7 +67,7 @@ func TestHandleCreationRequest_InvalidContentType(t *testing.T) {
 
 // Тест для случая, когда короткая ссылка найдена в хранилище
 func TestHandleShortRequest(t *testing.T) {
-	server := NewServer(&testServerConfig)
+	server := NewServer(&testServerConfig, serverLogger, middlewareLogger)
 
 	// добавляем фейковую короткую ссылку (mock)
 	server.storage["test1234"] = "https://google.com"
@@ -79,7 +89,7 @@ func TestHandleShortRequest(t *testing.T) {
 
 // Тест для случая с пустым телом запроса.
 func TestHandleCreationRequest_EmptyBody(t *testing.T) {
-	server := NewServer(&testServerConfig)
+	server := NewServer(&testServerConfig, serverLogger, middlewareLogger)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("   "))
 	req.Header.Set("Content-Type", "text/plain")
@@ -94,7 +104,7 @@ func TestHandleCreationRequest_EmptyBody(t *testing.T) {
 
 // Тест для случая, когда короткая ссылка не найдена в хранилище.
 func TestHandleShortRequestUnknown(t *testing.T) {
-	server := NewServer(&testServerConfig)
+	server := NewServer(&testServerConfig, serverLogger, middlewareLogger)
 
 	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
 	recorder := httptest.NewRecorder()
@@ -109,7 +119,7 @@ func TestHandleShortRequestUnknown(t *testing.T) {
 
 // Тестирует API создания короткой ссылки через JSON.
 func TestHandleShortenRequest(t *testing.T) {
-	server := NewServer(&testServerConfig)
+	server := NewServer(&testServerConfig, serverLogger, middlewareLogger)
 
 	body := `{"url":"https://google.com"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
@@ -146,7 +156,7 @@ func TestHandleShortenRequest(t *testing.T) {
 
 // Тестирует API создания короткой ссылки с неверным Content-Type.
 func TestHandleShortenRequest_InvalidContentType(t *testing.T) {
-	server := NewServer(&testServerConfig)
+	server := NewServer(&testServerConfig, serverLogger, middlewareLogger)
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -165,7 +175,7 @@ func TestHandleShortenRequest_InvalidContentType(t *testing.T) {
 
 // Тестирует API создания короткой ссылки с невалидным JSON-телом.
 func TestHandleShortenRequest_InvalidJSON(t *testing.T) {
-	server := NewServer(&testServerConfig)
+	server := NewServer(&testServerConfig, serverLogger, middlewareLogger)
 
 	req := httptest.NewRequest(
 		http.MethodPost,
@@ -184,7 +194,7 @@ func TestHandleShortenRequest_InvalidJSON(t *testing.T) {
 
 // Тестирует API создания короткой ссылки с пустым URL.
 func TestHandleShortenRequest_EmptyURL(t *testing.T) {
-	server := NewServer(&testServerConfig)
+	server := NewServer(&testServerConfig, serverLogger, middlewareLogger)
 
 	req := httptest.NewRequest(
 		http.MethodPost,

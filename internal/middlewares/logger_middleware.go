@@ -5,25 +5,27 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5/middleware"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 // LoggerMiddleware логирует информацию о каждом HTTP-запросе.
-func LoggerMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		wrappedWriter := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+func LoggerMiddleware(logger zerolog.Logger) func(handler http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			wrappedWriter := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
 
-		start := time.Now()
-		next.ServeHTTP(wrappedWriter, r)
-		duration := time.Since(start)
+			start := time.Now()
+			next.ServeHTTP(wrappedWriter, r)
+			duration := time.Since(start)
 
-		method := r.Method
-		path := r.RequestURI
-		log.Info().Str("method", method).
-			Str("path", path).
-			Int("status", wrappedWriter.Status()).
-			Int("size", wrappedWriter.BytesWritten()).
-			Dur("duration", duration).
-			Msg("HTTP request processed")
-	})
+			method := r.Method
+			path := r.RequestURI
+			logger.Info().Str("method", method).
+				Str("path", path).
+				Int("status", wrappedWriter.Status()).
+				Int("size", wrappedWriter.BytesWritten()).
+				Dur("duration", duration).
+				Msg("HTTP request processed")
+		})
+	}
 }
