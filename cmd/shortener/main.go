@@ -19,7 +19,9 @@ func main() {
 		Logger()
 
 	appConfig := internal.ParseAppConfig()
-	server := service.NewServer(appConfig, serverLogger, middlewareLogger)
+
+	storage := internal.NewInMemoryStorage(appConfig.FilePath)
+	server := service.NewServer(appConfig, serverLogger, middlewareLogger, storage)
 
 	if err := server.ServeHTTP(); err != nil {
 		serverLogger.Fatal().Err(err).Msg("failed to start server")

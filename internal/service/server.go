@@ -11,7 +11,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 
 	"github.com/Pelfox/go-shortener/internal"
@@ -22,14 +21,16 @@ import (
 	"github.com/rs/zerolog"
 )
 
+// maxGenerateAttempts определяет максимальное количество попыток сгенерировать
+// уникальный короткий ID для ссылки.
+const maxGenerateAttempts = 5
+
 type Server struct {
-	addr     string
-	baseURL  string
-	filePath string
+	addr    string
+	baseURL string
 
 	router  *chi.Mux
-	storage map[string]string // ключ = ID для короткой ссылки, значение = исходная URL
-	mutex   *sync.RWMutex
+	storage internal.Storage
 
 	logger zerolog.Logger
 }
@@ -38,20 +39,18 @@ func NewServer(
 	config *internal.AppConfig,
 	logger zerolog.Logger,
 	middlewareLogger zerolog.Logger,
+	storage internal.Storage,
 ) *Server {
 	router := chi.NewRouter()
 	router.Use(middlewares.LoggerMiddleware(middlewareLogger))
 	router.Use(middlewares.CompressMiddleware)
 
 	server := &Server{
-		addr:     config.Host,
-		baseURL:  config.URLPrefix,
-		filePath: config.FilePath,
-		router:   router,
-		storage:  make(map[string]string),
-		mutex:    &sync.RWMutex{},
-
-		logger: logger,
+		addr:    config.Host,
+		baseURL: config.URLPrefix,
+		router:  router,
+		storage: storage,
+		logger:  logger,
 	}
 
 	router.Post("/", server.handleCreationRequest)
@@ -61,23 +60,30 @@ func NewServer(
 	return server
 }
 
-func (s *Server) createShortLink(destinationURL string) (string, error) {
-	destinationURL = strings.TrimSpace(destinationURL)
-	if destinationURL == "" {
+func (s *Server) createShortLink(destination string) (string, error) {
+	destination = strings.TrimSpace(destination)
+	if destination == "" {
 		return "", errors.New("the destination URL is empty")
 	}
 
-	shortID := pkg.GenerateShortID(8)
-	shortURL, err := url.JoinPath(s.baseURL, shortID)
-	if err != nil {
-		return "", err
+	for i := 0; i < maxGenerateAttempts; i++ {
+		shortID := pkg.GenerateShortID(8)
+		if err := s.storage.Store(shortID, destination); err != nil {
+			if errors.Is(err, internal.ErrIDCollision) {
+				continue // попытка снова при коллизии
+			}
+			return "", err
+		}
+
+		shortURL, err := url.JoinPath(s.baseURL, shortID)
+		if err != nil {
+			return "", err
+		}
+
+		return shortURL, nil
 	}
 
-	s.mutex.Lock()
-	s.storage[shortID] = destinationURL
-	s.mutex.Unlock()
-
-	return shortURL, nil
+	return "", errors.New("failed to generate a unique short ID")
 }
 
 func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
@@ -156,60 +162,25 @@ func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/")
 	parts := strings.Split(path, "/")
+
 	id := parts[len(parts)-1]
+	destination, err := s.storage.Get(id)
 
-	s.mutex.RLock()
-	destinationURL, exists := s.storage[id]
-	s.mutex.RUnlock()
-
-	if !exists {
-		s.logger.Warn().Str("id", id).Msg("short URL not found")
-		http.Error(w, "Short URL not found.", http.StatusNotFound)
+	if err != nil {
+		if errors.Is(err, internal.ErrNotFound) {
+			http.Error(w, "Short URL not found.", http.StatusNotFound)
+			return
+		}
+		s.logger.Error().Err(err).Msg("failed to get short URL from storage")
+		http.Error(w, "Failed to retrieve short URL.", http.StatusInternalServerError)
 		return
 	}
 
-	http.Redirect(w, r, destinationURL, http.StatusTemporaryRedirect)
-}
-
-func (s *Server) createFileOrLoad() error {
-	file, err := os.OpenFile(
-		s.filePath,
-		os.O_RDWR|os.O_CREATE,
-		0644,
-	)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		return err
-	}
-
-	// если файл пустой - игнорируем
-	if len(data) == 0 {
-		return nil
-	}
-
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	return json.Unmarshal(data, &s.storage)
-}
-
-func (s *Server) saveStorageToFile() error {
-	s.mutex.RLock()
-	defer s.mutex.RUnlock()
-	data, err := json.Marshal(s.storage)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(s.filePath, data, 0644)
+	http.Redirect(w, r, destination, http.StatusTemporaryRedirect)
 }
 
 func (s *Server) ServeHTTP() error {
-	if err := s.createFileOrLoad(); err != nil {
+	if err := s.storage.Load(); err != nil {
 		return err
 	}
 
@@ -233,7 +204,7 @@ func (s *Server) ServeHTTP() error {
 	}()
 
 	<-ctx.Done()
-	if err := s.saveStorageToFile(); err != nil {
+	if err := s.storage.Save(); err != nil {
 		return err
 	}
 
