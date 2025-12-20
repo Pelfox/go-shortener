@@ -2,6 +2,7 @@ package service
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -16,7 +17,7 @@ import (
 
 var testServerConfig = internal.AppConfig{
 	Host:      "localhost:8080",
-	URLPrefix: "",
+	URLPrefix: "http://localhost:8080/",
 	FilePath:  "urls.json",
 }
 var serverLogger = zerolog.Nop()
@@ -45,6 +46,7 @@ func TestHandleCreationRequest(t *testing.T) {
 	}
 
 	body := recorder.Body.String()
+	fmt.Println(body)
 	if !strings.Contains(body, "http://localhost:8080/") {
 		t.Fatalf("expected returned short URL, got %q", body)
 	}
