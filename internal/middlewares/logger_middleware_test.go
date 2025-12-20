@@ -67,6 +67,6 @@ func TestLoggerMiddleware_NotFound(t *testing.T) {
 	}
 
 	if entry["status"] != float64(404) {
-		t.Fatalf("expected status 400, got %v", entry["status"])
+		t.Fatalf("expected status 404, got %v", entry["status"])
 	}
 }
