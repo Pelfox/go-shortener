@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -23,11 +24,11 @@ import (
 
 type Server struct {
 	addr     string
-	prefix   string
+	baseURL  string
 	filePath string
 
 	router  *chi.Mux
-	storage map[string]string
+	storage map[string]string // ключ = ID для короткой ссылки, значение = исходная URL
 	mutex   *sync.RWMutex
 
 	logger zerolog.Logger
@@ -44,7 +45,7 @@ func NewServer(
 
 	server := &Server{
 		addr:     config.Host,
-		prefix:   config.URLPrefix[strings.LastIndex(config.URLPrefix, "/")+1:],
+		baseURL:  config.URLPrefix,
 		filePath: config.FilePath,
 		router:   router,
 		storage:  make(map[string]string),
@@ -67,16 +68,16 @@ func (s *Server) createShortLink(destinationURL string) (string, error) {
 	}
 
 	shortID := pkg.GenerateShortID(8)
-	linkSlug := shortID
-	if s.prefix != "" {
-		linkSlug = fmt.Sprintf("%s/%s", s.prefix, shortID)
+	shortURL, err := url.JoinPath(s.baseURL, shortID)
+	if err != nil {
+		return "", err
 	}
 
 	s.mutex.Lock()
-	s.storage[linkSlug] = destinationURL
+	s.storage[shortID] = destinationURL
 	s.mutex.Unlock()
 
-	return fmt.Sprintf("http://%s/%s", s.addr, linkSlug), nil
+	return shortURL, nil
 }
 
 func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
@@ -153,12 +154,16 @@ func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
-	slug := strings.TrimPrefix(r.URL.Path, "/")
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+	id := parts[len(parts)-1]
+
 	s.mutex.RLock()
-	destinationURL, exists := s.storage[slug]
+	destinationURL, exists := s.storage[id]
 	s.mutex.RUnlock()
+
 	if !exists {
-		s.logger.Warn().Str("slug", slug).Msg("short URL not found")
+		s.logger.Warn().Str("id", id).Msg("short URL not found")
 		http.Error(w, "Short URL not found.", http.StatusNotFound)
 		return
 	}
