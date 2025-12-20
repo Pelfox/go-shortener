@@ -6,9 +6,9 @@ import (
 )
 
 type AppConfig struct {
-	Host      string // хост для старта HTTP сервера
-	URLPrefix string // префикс для коротких URL
-	FilePath  string // путь до файла сохранения
+	Addr     string // адрес для старта HTTP сервера
+	BaseURL  string // префикс для коротких URL
+	FilePath string // путь до файла сохранения
 }
 
 func getConfigValue(envName string, flagValue *string) string {
@@ -33,8 +33,8 @@ func ParseAppConfig() *AppConfig {
 	filePath := getConfigValue("FILE_STORAGE_PATH", fileFlag)
 
 	return &AppConfig{
-		Host:      host,
-		URLPrefix: urlPrefix,
-		FilePath:  filePath,
+		Addr:     host,
+		BaseURL:  urlPrefix,
+		FilePath: filePath,
 	}
 }
