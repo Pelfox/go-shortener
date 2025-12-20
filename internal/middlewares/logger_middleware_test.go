@@ -10,14 +10,15 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func setupLogger() (*bytes.Buffer, zerolog.Logger) {
+func setupLogger(t *testing.T) (*bytes.Buffer, zerolog.Logger) {
+	t.Helper()
 	var buf bytes.Buffer
 	return &buf, zerolog.New(&buf).With().Timestamp().Logger()
 }
 
 // Тестирует LoggerMiddleware для 200-х запросов.
 func TestLoggerMiddleware(t *testing.T) {
-	buf, logger := setupLogger()
+	buf, logger := setupLogger(t)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
@@ -51,7 +52,7 @@ func TestLoggerMiddleware(t *testing.T) {
 
 // Тестирует LoggerMiddleware для 404 запросов.
 func TestLoggerMiddleware_NotFound(t *testing.T) {
-	buf, logger := setupLogger()
+	buf, logger := setupLogger(t)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	})

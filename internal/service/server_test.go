@@ -25,6 +25,7 @@ var middlewareLogger = zerolog.Nop()
 
 // Создаём отдельный экземпляр хранилища для тестов.
 func createTestStorage(t *testing.T) internal.Storage {
+	t.Helper()
 	tempDir := t.TempDir()
 	return internal.NewInMemoryStorage(filepath.Join(tempDir, testServerConfig.FilePath))
 }
