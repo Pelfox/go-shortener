@@ -2,7 +2,6 @@ package service
 
 import (
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -53,7 +52,6 @@ func TestHandleCreationRequest(t *testing.T) {
 	}
 
 	body := recorder.Body.String()
-	fmt.Println(body)
 	if !strings.Contains(body, "http://localhost:8080/") {
 		t.Fatalf("expected returned short URL, got %q", body)
 	}
@@ -126,8 +124,8 @@ func TestHandleCreationRequest_EmptyBody(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	server.router.ServeHTTP(recorder, req)
 
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, recorder.Code)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
 	}
 }
 
@@ -265,7 +263,7 @@ func TestHandleShortenRequest_EmptyURL(t *testing.T) {
 	recorder := httptest.NewRecorder()
 	server.router.ServeHTTP(recorder, req)
 
-	if recorder.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, recorder.Code)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d", http.StatusBadRequest, recorder.Code)
 	}
 }
