@@ -28,6 +28,7 @@ type Server struct {
 func NewServer(addr string, urlPrefix string) *Server {
 	router := chi.NewRouter()
 	router.Use(middlewares.LoggerMiddleware)
+	router.Use(middlewares.CompressMiddleware)
 
 	server := &Server{
 		addr:    addr,
@@ -45,7 +46,7 @@ func NewServer(addr string, urlPrefix string) *Server {
 }
 
 func (s *Server) createShortLink(destinationURL string) (string, error) {
-	destinationURL = strings.TrimSpace(string(destinationURL))
+	destinationURL = strings.TrimSpace(destinationURL)
 	if destinationURL == "" {
 		return "", errors.New("the destination URL is empty")
 	}
