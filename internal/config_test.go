@@ -12,12 +12,12 @@ func TestParseAppConfig(t *testing.T) {
 	os.Args = []string{"cmd"}
 
 	cfg := ParseAppConfig()
-	if cfg.Host != "localhost:8080" {
-		t.Fatalf("expected default host, got %q", cfg.Host)
+	if cfg.Addr != "localhost:8080" {
+		t.Fatalf("expected default host, got %q", cfg.Addr)
 	}
 
-	if cfg.URLPrefix != "http://localhost:8080/" {
-		t.Fatalf("expected default URLPrefix, got %q", cfg.URLPrefix)
+	if cfg.BaseURL != "http://localhost:8080/" {
+		t.Fatalf("expected default BaseURL, got %q", cfg.BaseURL)
 	}
 }
 
@@ -29,7 +29,7 @@ func TestParseAppConfig_Override(t *testing.T) {
 	os.Args = []string{"cmd", "-a", "0.0.0.0:9000"}
 
 	cfg := ParseAppConfig()
-	if cfg.Host != "127.0.0.1:8080" {
-		t.Fatalf("expected env override, got %q", cfg.Host)
+	if cfg.Addr != "127.0.0.1:8080" {
+		t.Fatalf("expected env override, got %q", cfg.Addr)
 	}
 }

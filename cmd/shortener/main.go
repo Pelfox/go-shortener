@@ -1,16 +1,35 @@
 package main
 
 import (
+	"os"
+
 	"github.com/Pelfox/go-shortener/internal"
 	"github.com/Pelfox/go-shortener/internal/service"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
 func main() {
+	serverLogger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().
+		Timestamp().
+		Str("component", "server").
+		Logger()
+	middlewareLogger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().
+		Timestamp().
+		Str("component", "logger-middleware").
+		Logger()
+
 	appConfig := internal.ParseAppConfig()
 
-	server := service.NewServer(appConfig.Host, appConfig.URLPrefix)
+	storage := internal.NewInMemoryStorage(appConfig.FilePath)
+	server := service.NewServer(
+		appConfig.Addr,
+		appConfig.BaseURL,
+		serverLogger,
+		middlewareLogger,
+		storage,
+	)
+
 	if err := server.ServeHTTP(); err != nil {
-		log.Fatal().Err(err).Msg("failed to start server")
+		serverLogger.Fatal().Err(err).Msg("failed to start server")
 	}
 }

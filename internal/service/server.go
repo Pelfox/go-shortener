@@ -1,41 +1,60 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
 	"strings"
-	"sync"
+	"syscall"
 
+	"github.com/Pelfox/go-shortener/internal"
 	"github.com/Pelfox/go-shortener/internal/middlewares"
 	"github.com/Pelfox/go-shortener/pkg"
 	"github.com/Pelfox/go-shortener/pkg/schemas"
 	"github.com/go-chi/chi/v5"
-	"github.com/rs/zerolog/log"
+	"github.com/rs/zerolog"
 )
 
+// maxGenerateAttempts определяет максимальное количество попыток сгенерировать
+// уникальный короткий ID для ссылки.
+const maxGenerateAttempts = 5
+
+// errDestinationEmpty указывает на то, что переданный URL назначения пуст.
+var errDestinationEmpty = errors.New("the destination URL is empty")
+
+// Server реализует основной функционал приложения, а также HTTP-сервер.
 type Server struct {
-	addr   string
-	prefix string
+	addr    string
+	baseURL string
 
 	router  *chi.Mux
-	storage map[string]string
-	mutex   *sync.RWMutex
+	storage internal.Storage
+	logger  zerolog.Logger
 }
 
-func NewServer(addr string, urlPrefix string) *Server {
+// NewServer создаёт и настраивает новый экземпляр Server.
+func NewServer(
+	addr string,
+	baseURL string,
+	logger zerolog.Logger,
+	middlewareLogger zerolog.Logger,
+	storage internal.Storage,
+) *Server {
 	router := chi.NewRouter()
-	router.Use(middlewares.LoggerMiddleware)
+	router.Use(middlewares.LoggerMiddleware(middlewareLogger))
 	router.Use(middlewares.CompressMiddleware)
 
 	server := &Server{
 		addr:    addr,
-		prefix:  urlPrefix[strings.LastIndex(urlPrefix, "/")+1:],
+		baseURL: baseURL,
 		router:  router,
-		storage: make(map[string]string),
-		mutex:   &sync.RWMutex{},
+		storage: storage,
+		logger:  logger,
 	}
 
 	router.Post("/", server.handleCreationRequest)
@@ -45,42 +64,54 @@ func NewServer(addr string, urlPrefix string) *Server {
 	return server
 }
 
-func (s *Server) createShortLink(destinationURL string) (string, error) {
-	destinationURL = strings.TrimSpace(destinationURL)
-	if destinationURL == "" {
-		return "", errors.New("the destination URL is empty")
+func (s *Server) createShortLink(destination string) (string, error) {
+	destination = strings.TrimSpace(destination)
+	if destination == "" {
+		return "", errDestinationEmpty
 	}
 
-	shortID := pkg.GenerateShortID(8)
-	linkSlug := shortID
-	if s.prefix != "" {
-		linkSlug = fmt.Sprintf("%s/%s", s.prefix, shortID)
+	for i := 0; i < maxGenerateAttempts; i++ {
+		shortID := pkg.GenerateShortID(8)
+		if err := s.storage.Store(shortID, destination); err != nil {
+			if errors.Is(err, internal.ErrIDCollision) {
+				continue // попытка снова при коллизии
+			}
+			return "", err
+		}
+
+		shortURL, err := url.JoinPath(s.baseURL, shortID)
+		if err != nil {
+			return "", err
+		}
+
+		return shortURL, nil
 	}
 
-	s.mutex.Lock()
-	s.storage[linkSlug] = destinationURL
-	s.mutex.Unlock()
-
-	return fmt.Sprintf("http://%s/%s", s.addr, linkSlug), nil
+	return "", errors.New("failed to generate a unique short ID")
 }
 
 func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Content-Type") != "text/plain" {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "text/plain") {
 		http.Error(w, "Invalid content type.", http.StatusBadRequest)
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to read body")
-		http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
+		s.logger.Error().Err(err).Msg("failed to read body")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	defer r.Body.Close()
 
 	shortLink, err := s.createShortLink(string(body))
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create short link: %v", err), http.StatusInternalServerError)
+		if errors.Is(err, errDestinationEmpty) {
+			http.Error(w, "The destination URL is empty.", http.StatusBadRequest)
+			return
+		}
+		s.logger.Error().Err(err).Msg("failed to create short link")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -88,43 +119,48 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	w.Write([]byte(shortLink))
 
-	log.Info().Str("slug", shortLink).
+	s.logger.Info().Str("slug", shortLink).
 		Str("destination", string(body)).
 		Msg("created short URL")
 }
 
 func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
-	if r.Header.Get("Content-Type") != "application/json" {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
 		http.Error(w, "Invalid content type.", http.StatusBadRequest)
 		return
 	}
 
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to read body")
-		http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
+		s.logger.Error().Err(err).Msg("failed to read body")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 	defer r.Body.Close()
 
 	var request schemas.CreateShortLink
 	if err := json.Unmarshal(body, &request); err != nil {
-		log.Error().Err(err).Msg("failed to unmarshal JSON")
+		s.logger.Error().Err(err).Msg("failed to unmarshal JSON")
 		http.Error(w, "Invalid JSON body.", http.StatusBadRequest)
 		return
 	}
 
 	shortLink, err := s.createShortLink(request.URL)
 	if err != nil {
-		http.Error(w, fmt.Sprintf("Failed to create short link: %v", err), http.StatusInternalServerError)
+		if errors.Is(err, errDestinationEmpty) {
+			http.Error(w, "The destination URL is empty.", http.StatusBadRequest)
+			return
+		}
+		s.logger.Error().Err(err).Msg("failed to create short link")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
 	response := schemas.ShortLinkResponse{Result: shortLink}
 	responseBody, err := json.Marshal(response)
 	if err != nil {
-		log.Error().Err(err).Msg("failed to marshal JSON")
-		http.Error(w, "Failed to create response.", http.StatusInternalServerError)
+		s.logger.Error().Err(err).Msg("failed to marshal JSON")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -132,26 +168,60 @@ func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 	w.Write(responseBody)
 
-	log.Info().Str("slug", shortLink).
+	s.logger.Info().Str("slug", shortLink).
 		Str("destination", request.URL).
 		Msg("created short URL (via API)")
 }
 
 func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
-	slug := strings.TrimPrefix(r.URL.Path, "/")
-	s.mutex.RLock()
-	destinationURL, exists := s.storage[slug]
-	s.mutex.RUnlock()
-	if !exists {
-		log.Warn().Str("slug", slug).Msg("short URL not found")
-		http.Error(w, "Short URL not found.", http.StatusNotFound)
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+
+	id := parts[len(parts)-1]
+	destination, err := s.storage.Get(id)
+
+	if err != nil {
+		if errors.Is(err, internal.ErrNotFound) {
+			http.Error(w, "Short URL not found.", http.StatusNotFound)
+			return
+		}
+		s.logger.Error().Err(err).Msg("failed to get short URL from storage")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
-	http.Redirect(w, r, destinationURL, http.StatusTemporaryRedirect)
+	http.Redirect(w, r, destination, http.StatusTemporaryRedirect)
 }
 
+// ServeHTTP запускает HTTP-сервер и обрабатывает завершение работы.
 func (s *Server) ServeHTTP() error {
-	log.Info().Str("addr", s.addr).Msg("starting server")
-	return http.ListenAndServe(s.addr, s.router)
+	if err := s.storage.Load(); err != nil {
+		return err
+	}
+
+	server := &http.Server{
+		Addr:    s.addr,
+		Handler: s.router,
+	}
+
+	ctx, stop := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
+	defer stop()
+
+	go func() {
+		s.logger.Info().Str("addr", s.addr).Msg("starting server")
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			s.logger.Error().Err(err).Msg("caught a server error")
+		}
+	}()
+
+	<-ctx.Done()
+	if err := s.storage.Save(); err != nil {
+		return err
+	}
+
+	return server.Shutdown(context.Background())
 }

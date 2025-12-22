@@ -5,9 +5,14 @@ import (
 	"os"
 )
 
+// AppConfig хранит конфигурацию приложения.
 type AppConfig struct {
-	Host      string // хост для старта HTTP сервера
-	URLPrefix string // префикс для коротких URL
+	// Addr это адрес для HTTP-сервера.
+	Addr string
+	// BaseURL это базовый URL для коротких ссылок.
+	BaseURL string
+	// FilePath это путь к файлу для хранения ссылок.
+	FilePath string
 }
 
 func getConfigValue(envName string, flagValue *string) string {
@@ -21,16 +26,21 @@ func getConfigValue(envName string, flagValue *string) string {
 	return *flagValue
 }
 
+// ParseAppConfig парсит конфигурацию приложения из флагов командной строки и
+// переменных окружения.
 func ParseAppConfig() *AppConfig {
 	hostFlag := flag.String("a", "localhost:8080", "Адрес, на котором будет запущен HTTP сервер.")
 	urlPrefixFlag := flag.String("b", "http://localhost:8080/", "Префикс для коротких URL.")
+	fileFlag := flag.String("f", "urls.json", "Файл для сохранения URL.")
 	flag.Parse()
 
 	host := getConfigValue("SERVER_ADDRESS", hostFlag)
 	urlPrefix := getConfigValue("BASE_URL", urlPrefixFlag)
+	filePath := getConfigValue("FILE_STORAGE_PATH", fileFlag)
 
 	return &AppConfig{
-		Host:      host,
-		URLPrefix: urlPrefix,
+		Addr:     host,
+		BaseURL:  urlPrefix,
+		FilePath: filePath,
 	}
 }
