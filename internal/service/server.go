@@ -1,6 +1,8 @@
 package service
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,6 +11,7 @@ import (
 
 	"github.com/Pelfox/go-shortener/internal/middlewares"
 	"github.com/Pelfox/go-shortener/pkg"
+	"github.com/Pelfox/go-shortener/pkg/schemas"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog/log"
 )
@@ -35,9 +38,29 @@ func NewServer(addr string, urlPrefix string) *Server {
 	}
 
 	router.Post("/", server.handleCreationRequest)
+	router.Post("/api/shorten", server.handleShortenRequest)
 	router.Get("/*", server.handleShortRequest)
 
 	return server
+}
+
+func (s *Server) createShortLink(destinationURL string) (string, error) {
+	destinationURL = strings.TrimSpace(string(destinationURL))
+	if destinationURL == "" {
+		return "", errors.New("the destination URL is empty")
+	}
+
+	shortID := pkg.GenerateShortID(8)
+	linkSlug := shortID
+	if s.prefix != "" {
+		linkSlug = fmt.Sprintf("%s/%s", s.prefix, shortID)
+	}
+
+	s.mutex.Lock()
+	s.storage[linkSlug] = destinationURL
+	s.mutex.Unlock()
+
+	return fmt.Sprintf("http://%s/%s", s.addr, linkSlug), nil
 }
 
 func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
@@ -54,29 +77,63 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	destinationURL := strings.TrimSpace(string(body))
-	if destinationURL == "" {
-		http.Error(w, "The supplied destination URL is empty.", http.StatusBadRequest)
+	shortLink, err := s.createShortLink(string(body))
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create short link: %v", err), http.StatusInternalServerError)
 		return
 	}
 
-	shortID := pkg.GenerateShortID(8)
-	linkSlug := shortID
-	if s.prefix != "" {
-		linkSlug = fmt.Sprintf("%s/%s", s.prefix, shortID)
-	}
-
-	s.mutex.Lock()
-	s.storage[linkSlug] = destinationURL
-	s.mutex.Unlock()
-
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
-	w.Write([]byte(fmt.Sprintf("http://%s/%s", s.addr, linkSlug)))
+	w.Write([]byte(shortLink))
 
-	log.Info().Str("slug", linkSlug).
-		Str("destination", destinationURL).
+	log.Info().Str("slug", shortLink).
+		Str("destination", string(body)).
 		Msg("created short URL")
+}
+
+func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		http.Error(w, "Invalid content type.", http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to read body")
+		http.Error(w, "Failed to read request body.", http.StatusInternalServerError)
+		return
+	}
+	defer r.Body.Close()
+
+	var request schemas.CreateShortLink
+	if err := json.Unmarshal(body, &request); err != nil {
+		log.Error().Err(err).Msg("failed to unmarshal JSON")
+		http.Error(w, "Invalid JSON body.", http.StatusBadRequest)
+		return
+	}
+
+	shortLink, err := s.createShortLink(request.URL)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Failed to create short link: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	response := schemas.ShortLinkResponse{Result: shortLink}
+	responseBody, err := json.Marshal(response)
+	if err != nil {
+		log.Error().Err(err).Msg("failed to marshal JSON")
+		http.Error(w, "Failed to create response.", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	w.Write(responseBody)
+
+	log.Info().Str("slug", shortLink).
+		Str("destination", request.URL).
+		Msg("created short URL (via API)")
 }
 
 func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
