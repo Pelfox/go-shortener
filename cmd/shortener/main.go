@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/Pelfox/go-shortener/internal"
 	"github.com/Pelfox/go-shortener/internal/service"
+	"github.com/rs/zerolog/log"
 )
 
 func main() {
@@ -10,6 +11,6 @@ func main() {
 
 	server := service.NewServer(appConfig.Host, appConfig.URLPrefix)
 	if err := server.ServeHTTP(); err != nil {
-		panic(err)
+		log.Fatal().Err(err).Msg("failed to start server")
 	}
 }
