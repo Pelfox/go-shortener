@@ -31,6 +31,10 @@ func main() {
 	var err error
 
 	if appConfig.DatabaseDSN != "" {
+		if err := internal.RunMigrations(ctx, appConfig.DatabaseDSN, "migrations"); err != nil {
+			serverLogger.Fatal().Err(err).Msg("failed to run migrations")
+		}
+
 		pool, err = internal.NewDatabase(ctx, appConfig.DatabaseDSN)
 		if err != nil {
 			serverLogger.Fatal().Err(err).Msg("failed to connect to database")
