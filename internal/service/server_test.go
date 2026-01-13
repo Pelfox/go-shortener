@@ -11,13 +11,15 @@ import (
 
 	"github.com/Pelfox/go-shortener/internal"
 	"github.com/Pelfox/go-shortener/pkg/schemas"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 )
 
 var testServerConfig = internal.AppConfig{
-	Addr:     "localhost:8080",
-	BaseURL:  "http://localhost:8080/",
-	FilePath: "urls.json",
+	Addr:        "localhost:8080",
+	BaseURL:     "http://localhost:8080/",
+	FilePath:    "urls.json",
+	DatabaseDSN: "postgres://postgres:postgres@localhost:5432/postgres?sslmode=disable",
 }
 var serverLogger = zerolog.Nop()
 var middlewareLogger = zerolog.Nop()
@@ -29,6 +31,19 @@ func createTestStorage(t *testing.T) internal.Storage {
 	return internal.NewInMemoryStorage(filepath.Join(tempDir, testServerConfig.FilePath))
 }
 
+// Создаём отдельный экземпляр пула подключений к базе данных для тестов.
+func createDatabasePool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	pool, err := pgxpool.New(
+		t.Context(),
+		testServerConfig.DatabaseDSN,
+	)
+	if err != nil {
+		t.Fatalf("failed to create database pool: %v", err)
+	}
+	return pool
+}
+
 // Тест для создания короткой ссылки.
 func TestHandleCreationRequest(t *testing.T) {
 	server := NewServer(
@@ -37,6 +52,7 @@ func TestHandleCreationRequest(t *testing.T) {
 		serverLogger,
 		middlewareLogger,
 		createTestStorage(t),
+		createDatabasePool(t),
 	)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://google.com"))
@@ -65,6 +81,7 @@ func TestHandleCreationRequest_InvalidContentType(t *testing.T) {
 		serverLogger,
 		middlewareLogger,
 		createTestStorage(t),
+		createDatabasePool(t),
 	)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://google.com"))
@@ -86,6 +103,7 @@ func TestHandleShortRequest(t *testing.T) {
 		serverLogger,
 		middlewareLogger,
 		createTestStorage(t),
+		createDatabasePool(t),
 	)
 
 	// добавляем фейковую короткую ссылку (mock)
@@ -116,6 +134,7 @@ func TestHandleCreationRequest_EmptyBody(t *testing.T) {
 		serverLogger,
 		middlewareLogger,
 		createTestStorage(t),
+		createDatabasePool(t),
 	)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("   "))
@@ -137,6 +156,7 @@ func TestHandleShortRequestUnknown(t *testing.T) {
 		serverLogger,
 		middlewareLogger,
 		createTestStorage(t),
+		createDatabasePool(t),
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "/unknown", nil)
@@ -158,6 +178,7 @@ func TestHandleShortenRequest(t *testing.T) {
 		serverLogger,
 		middlewareLogger,
 		createTestStorage(t),
+		createDatabasePool(t),
 	)
 
 	body := `{"url":"https://google.com"}`
@@ -201,6 +222,7 @@ func TestHandleShortenRequest_InvalidContentType(t *testing.T) {
 		serverLogger,
 		middlewareLogger,
 		createTestStorage(t),
+		createDatabasePool(t),
 	)
 
 	req := httptest.NewRequest(
@@ -226,6 +248,7 @@ func TestHandleShortenRequest_InvalidJSON(t *testing.T) {
 		serverLogger,
 		middlewareLogger,
 		createTestStorage(t),
+		createDatabasePool(t),
 	)
 
 	req := httptest.NewRequest(
@@ -251,6 +274,7 @@ func TestHandleShortenRequest_EmptyURL(t *testing.T) {
 		serverLogger,
 		middlewareLogger,
 		createTestStorage(t),
+		createDatabasePool(t),
 	)
 
 	req := httptest.NewRequest(
