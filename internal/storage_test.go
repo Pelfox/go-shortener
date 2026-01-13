@@ -1,6 +1,7 @@
 package internal
 
 import (
+	"context"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -14,13 +15,14 @@ func newTestStorage(t *testing.T) *InMemoryStorage {
 // Тестирует сохранение и получение значений в InMemoryStorage.
 func TestInMemoryStorage_StoreAndGet(t *testing.T) {
 	storage := newTestStorage(t)
+	ctx := context.Background()
 
-	err := storage.Store("abc123", "https://google.com")
+	err := storage.Store(ctx, "abc123", "https://google.com")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	value, err := storage.Get("abc123")
+	value, err := storage.Get(ctx, "abc123")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -33,11 +35,13 @@ func TestInMemoryStorage_StoreAndGet(t *testing.T) {
 // Тестирует обработку коллизий при сохранении в InMemoryStorage.
 func TestInMemoryStorage_StoreCollision(t *testing.T) {
 	storage := newTestStorage(t)
-	if err := storage.Store("id", "url1"); err != nil {
+	ctx := context.Background()
+
+	if err := storage.Store(ctx, "id", "url1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	err := storage.Store("id", "url2")
+	err := storage.Store(ctx, "id", "url2")
 	if !errors.Is(err, ErrIDCollision) {
 		t.Fatalf("expected ErrIDCollision, got %v", err)
 	}
@@ -46,7 +50,9 @@ func TestInMemoryStorage_StoreCollision(t *testing.T) {
 // Тестирует получение несуществующего ключа из InMemoryStorage.
 func TestInMemoryStorage_GetNotFound(t *testing.T) {
 	storage := newTestStorage(t)
-	_, err := storage.Get("missing")
+	ctx := context.Background()
+
+	_, err := storage.Get(ctx, "missing")
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got %v", err)
 	}
@@ -55,7 +61,9 @@ func TestInMemoryStorage_GetNotFound(t *testing.T) {
 // Тестирует сохранение и загрузку данных из файла в InMemoryStorage.
 func TestInMemoryStorage_SaveAndLoad(t *testing.T) {
 	storage := newTestStorage(t)
-	if err := storage.Store("id1", "https://example.com"); err != nil {
+	ctx := context.Background()
+
+	if err := storage.Store(ctx, "id1", "https://example.com"); err != nil {
 		t.Fatalf("store failed: %v", err)
 	}
 
@@ -69,7 +77,7 @@ func TestInMemoryStorage_SaveAndLoad(t *testing.T) {
 		t.Fatalf("load failed: %v", err)
 	}
 
-	value, err := newStorage.Get("id1")
+	value, err := newStorage.Get(ctx, "id1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
