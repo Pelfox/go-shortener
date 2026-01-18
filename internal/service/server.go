@@ -63,6 +63,7 @@ func NewServer(
 	}
 
 	router.Post("/", server.handleCreationRequest)
+	router.Post("/api/shorten/batch", server.handleBatchRequest)
 	router.Post("/api/shorten", server.handleShortenRequest)
 	router.Get("/ping", server.handlePingRequest)
 	router.Get("/*", server.handleShortRequest)
@@ -212,6 +213,65 @@ func (s *Server) handlePingRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (s *Server) handleBatchRequest(w http.ResponseWriter, r *http.Request) {
+	if !strings.HasPrefix(r.Header.Get("Content-Type"), "application/json") {
+		http.Error(w, "Invalid content type.", http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("failed to read body")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	defer r.Body.Close()
+
+	s.logger.Info().
+		Bytes("raw_body", body).
+		Str("as_string", string(body)).
+		Msg("DEBUG body")
+
+	var request []schemas.BatchedLinkRequest
+	if err := json.Unmarshal(body, &request); err != nil {
+		s.logger.Error().Err(err).Msg("failed to unmarshal JSON111")
+		http.Error(w, "Invalid JSON body.", http.StatusBadRequest)
+		return
+	}
+
+	response := make([]schemas.BatchedLinkResponse, 0)
+	for _, link := range request {
+		shortLink, err := s.createShortLink(r.Context(), link.OriginalURL)
+		if err != nil {
+			if errors.Is(err, errDestinationEmpty) {
+				http.Error(w, "The destination URL is empty.", http.StatusBadRequest)
+				return
+			}
+			s.logger.Error().Err(err).Msg("failed to create short link")
+			http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+			return
+		}
+		response = append(response, schemas.BatchedLinkResponse{
+			CorrelationID: link.CorrelationID,
+			ShortURL:      shortLink,
+		})
+	}
+
+	responseBody, err := json.Marshal(response)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("failed to marshal JSON")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	w.Write(responseBody)
+
+	s.logger.Info().Int("count", len(response)).
+		Msg("created batched short links")
 }
 
 // ServeHTTP запускает HTTP-сервер и обрабатывает завершение работы.
