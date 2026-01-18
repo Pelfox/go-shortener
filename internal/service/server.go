@@ -249,11 +249,6 @@ func (s *Server) handleBatchRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	s.logger.Info().
-		Bytes("raw_body", body).
-		Str("as_string", string(body)).
-		Msg("DEBUG body")
-
 	var request []schemas.BatchedLinkRequest
 	if err := json.Unmarshal(body, &request); err != nil {
 		s.logger.Error().Err(err).Msg("failed to unmarshal JSON111")
