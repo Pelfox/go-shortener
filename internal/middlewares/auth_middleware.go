@@ -42,8 +42,12 @@ func AuthMiddleware(
 
 			userID, cookieValue := userService.CreateUserCookie()
 			http.SetCookie(w, &http.Cookie{
-				Name:  cookieName,
-				Value: cookieValue,
+				Name:     cookieName,
+				Value:    cookieValue,
+				Path:     "/",
+				HttpOnly: true,
+				SameSite: http.SameSiteLaxMode,
+				Secure:   r.TLS != nil,
 			})
 			userContext := context.WithValue(r.Context(), pkg.ContextUserIDKey, userID)
 			next.ServeHTTP(w, r.WithContext(userContext))

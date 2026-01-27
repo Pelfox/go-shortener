@@ -15,6 +15,8 @@ type AppConfig struct {
 	FilePath string
 	// DatabaseDSN это строка подключения к базе данных.
 	DatabaseDSN string
+	// Secret это секрет для HMAC генерации пользовательского ID.
+	Secret []byte
 }
 
 func getConfigValue(envName string, flagValue *string) string {
@@ -35,17 +37,20 @@ func ParseAppConfig() *AppConfig {
 	urlPrefixFlag := flag.String("b", "http://localhost:8080/", "Префикс для коротких URL.")
 	fileFlag := flag.String("f", "urls.json", "Файл для сохранения URL.")
 	databaseDSNFlag := flag.String("d", "", "Строка подключения к базе данных. Пустое значение отключает БД.")
+	secretFlag := flag.String("s", "", "Секрет для HMAC.")
 	flag.Parse()
 
 	host := getConfigValue("SERVER_ADDRESS", hostFlag)
 	urlPrefix := getConfigValue("BASE_URL", urlPrefixFlag)
 	filePath := getConfigValue("FILE_STORAGE_PATH", fileFlag)
 	databaseDSN := getConfigValue("DATABASE_DSN", databaseDSNFlag)
+	secret := getConfigValue("SECRET", secretFlag)
 
 	return &AppConfig{
 		Addr:        host,
 		BaseURL:     urlPrefix,
 		FilePath:    filePath,
 		DatabaseDSN: databaseDSN,
+		Secret:      []byte(secret),
 	}
 }

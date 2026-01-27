@@ -36,7 +36,7 @@ func main() {
 		appConfig.Addr,
 		appConfig.BaseURL,
 		logger,
-		[]byte("very-strong-secret"),
+		appConfig.Secret,
 		storageInstance,
 		pool,
 	)
