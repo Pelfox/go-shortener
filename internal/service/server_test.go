@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -107,7 +108,7 @@ func TestHandleShortRequest(t *testing.T) {
 	)
 
 	// добавляем фейковую короткую ссылку (mock)
-	if err := server.storage.Store("test1234", "https://google.com"); err != nil {
+	if err := server.storage.Store(context.Background(), "test1234", "https://google.com"); err != nil {
 		t.Fatalf("failed to store test data: %v", err)
 	}
 

@@ -34,7 +34,7 @@ func ParseAppConfig() *AppConfig {
 	hostFlag := flag.String("a", "localhost:8080", "Адрес, на котором будет запущен HTTP сервер.")
 	urlPrefixFlag := flag.String("b", "http://localhost:8080/", "Префикс для коротких URL.")
 	fileFlag := flag.String("f", "urls.json", "Файл для сохранения URL.")
-	databaseDSNFlag := flag.String("d", "postgres://postgres:postgres@localhost:5432/postgres", "Строка подключения к базе данных.")
+	databaseDSNFlag := flag.String("d", "", "Строка подключения к базе данных. Пустое значение отключает БД.")
 	flag.Parse()
 
 	host := getConfigValue("SERVER_ADDRESS", hostFlag)

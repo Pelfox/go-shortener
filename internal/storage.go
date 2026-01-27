@@ -1,12 +1,18 @@
 package internal
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"os"
 	"sync"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/rs/zerolog"
 )
 
 var (
@@ -20,14 +26,25 @@ var (
 // Storage определяет интерфейс для хранения и получения коротких ссылок.
 type Storage interface {
 	// Store сохраняет короткую ссылку с заданным ID и URL назначения.
-	Store(id string, destination string) error
+	Store(ctx context.Context, id string, destination string) error
 	// Get возвращает URL назначения для короткой ссылки с заданным ID.
-	Get(id string) (string, error)
+	Get(ctx context.Context, id string) (string, error)
 
 	// Load загружает данные из системы хранения (файл, БД, пр.) в хранилище.
 	Load() error
 	// Save сохраняет данные из хранилища в систему хранения (файл, БД, пр.).
 	Save() error
+}
+
+// NewStorageFromConfig выбирает PostgreSQL-хранилище при заданной строке
+// подключения, иначе использует in-memory хранилище.
+func NewStorageFromConfig(logger zerolog.Logger, filePath string, pool *pgxpool.Pool) Storage {
+	if pool == nil {
+		logger.Info().Msg("using in-memory storage")
+		return NewInMemoryStorage(filePath)
+	}
+	logger.Info().Msg("using database storage")
+	return NewPostgresStorage(pool)
 }
 
 // InMemoryStorage реализует интерфейс Storage, используя в памяти карту для
@@ -47,7 +64,7 @@ func NewInMemoryStorage(filePath string) *InMemoryStorage {
 	}
 }
 
-func (s *InMemoryStorage) Store(id string, destination string) error {
+func (s *InMemoryStorage) Store(_ context.Context, id string, destination string) error {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -59,7 +76,7 @@ func (s *InMemoryStorage) Store(id string, destination string) error {
 	return nil
 }
 
-func (s *InMemoryStorage) Get(id string) (string, error) {
+func (s *InMemoryStorage) Get(_ context.Context, id string) (string, error) {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
@@ -114,5 +131,49 @@ func (s *InMemoryStorage) Save() error {
 		return fmt.Errorf("could not write data to file %q: %w", s.filePath, err)
 	}
 
+	return nil
+}
+
+// PostgresStorage реализует интерфейс Storage, используя PostgreSQL для
+// хранения коротких ссылок.
+type PostgresStorage struct {
+	pool *pgxpool.Pool
+}
+
+// NewPostgresStorage создаёт новый экземпляр PostgresStorage.
+func NewPostgresStorage(pool *pgxpool.Pool) *PostgresStorage {
+	return &PostgresStorage{pool: pool}
+}
+
+func (s PostgresStorage) Store(ctx context.Context, id string, destination string) error {
+	_, err := s.pool.Exec(ctx, "INSERT INTO links (slug, destination) VALUES ($1, $2)", id, destination)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		// 23505 — уникальность ключей нарушена
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return ErrIDCollision
+		}
+		return fmt.Errorf("could not store link: %w", err)
+	}
+	return nil
+}
+
+func (s PostgresStorage) Get(ctx context.Context, id string) (string, error) {
+	var destination string
+	err := s.pool.QueryRow(ctx, "SELECT destination FROM links WHERE slug = $1", id).Scan(&destination)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("could not get link: %w", err)
+	}
+	return destination, nil
+}
+
+func (s PostgresStorage) Load() error {
+	return nil
+}
+
+func (s PostgresStorage) Save() error {
 	return nil
 }

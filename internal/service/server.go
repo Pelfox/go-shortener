@@ -70,7 +70,7 @@ func NewServer(
 	return server
 }
 
-func (s *Server) createShortLink(destination string) (string, error) {
+func (s *Server) createShortLink(ctx context.Context, destination string) (string, error) {
 	destination = strings.TrimSpace(destination)
 	if destination == "" {
 		return "", errDestinationEmpty
@@ -78,7 +78,7 @@ func (s *Server) createShortLink(destination string) (string, error) {
 
 	for i := 0; i < maxGenerateAttempts; i++ {
 		shortID := pkg.GenerateShortID(8)
-		if err := s.storage.Store(shortID, destination); err != nil {
+		if err := s.storage.Store(ctx, shortID, destination); err != nil {
 			if errors.Is(err, internal.ErrIDCollision) {
 				continue // попытка снова при коллизии
 			}
@@ -110,7 +110,7 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	shortLink, err := s.createShortLink(string(body))
+	shortLink, err := s.createShortLink(r.Context(), string(body))
 	if err != nil {
 		if errors.Is(err, errDestinationEmpty) {
 			http.Error(w, "The destination URL is empty.", http.StatusBadRequest)
@@ -151,7 +151,7 @@ func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortLink, err := s.createShortLink(request.URL)
+	shortLink, err := s.createShortLink(r.Context(), request.URL)
 	if err != nil {
 		if errors.Is(err, errDestinationEmpty) {
 			http.Error(w, "The destination URL is empty.", http.StatusBadRequest)
@@ -184,7 +184,7 @@ func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(path, "/")
 
 	id := parts[len(parts)-1]
-	destination, err := s.storage.Get(id)
+	destination, err := s.storage.Get(r.Context(), id)
 
 	if err != nil {
 		if errors.Is(err, internal.ErrNotFound) {
@@ -200,6 +200,11 @@ func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handlePingRequest(w http.ResponseWriter, r *http.Request) {
+	if s.pool == nil {
+		http.Error(w, "No pool available.", http.StatusServiceUnavailable)
+		return
+	}
+
 	if err := s.pool.Ping(r.Context()); err != nil {
 		s.logger.Error().Err(err).Msg("failed to ping database")
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
