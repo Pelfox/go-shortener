@@ -5,24 +5,13 @@ import (
 	"os"
 
 	"github.com/Pelfox/go-shortener/internal"
-	"github.com/Pelfox/go-shortener/internal/service"
+	"github.com/Pelfox/go-shortener/internal/storage"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 )
 
 func main() {
-	serverLogger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().
-		Timestamp().
-		Str("component", "server").
-		Logger()
-	middlewareLogger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().
-		Timestamp().
-		Str("component", "logger-middleware").
-		Logger()
-	storageLogger := zerolog.New(zerolog.ConsoleWriter{Out: os.Stdout}).With().
-		Timestamp().
-		Str("component", "storage").
-		Logger()
+	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
 
 	ctx := context.Background()
 	appConfig := internal.ParseAppConfig()
@@ -31,28 +20,28 @@ func main() {
 	var err error
 
 	if appConfig.DatabaseDSN != "" {
-		if err := internal.RunMigrations(ctx, appConfig.DatabaseDSN, "migrations"); err != nil {
-			serverLogger.Fatal().Err(err).Msg("failed to run migrations")
+		if err := storage.RunMigrations(ctx, appConfig.DatabaseDSN, "migrations"); err != nil {
+			logger.Fatal().Err(err).Msg("failed to apply migrations")
 		}
 
-		pool, err = internal.NewDatabase(ctx, appConfig.DatabaseDSN)
+		pool, err = storage.NewDatabase(ctx, appConfig.DatabaseDSN)
 		if err != nil {
-			serverLogger.Fatal().Err(err).Msg("failed to connect to database")
+			logger.Fatal().Err(err).Msg("failed to connect to database")
 		}
 		defer pool.Close()
 	}
 
-	storage := internal.NewStorageFromConfig(storageLogger, appConfig.FilePath, pool)
-	server := service.NewServer(
+	storageInstance := storage.NewStorageFromConfig(logger, appConfig.FilePath, pool)
+	server := internal.NewServer(
 		appConfig.Addr,
 		appConfig.BaseURL,
-		serverLogger,
-		middlewareLogger,
-		storage,
+		logger,
+		[]byte("very-strong-secret"),
+		storageInstance,
 		pool,
 	)
 
 	if err := server.ServeHTTP(); err != nil {
-		serverLogger.Fatal().Err(err).Msg("failed to start server")
+		logger.Fatal().Err(err).Msg("failed to start the server")
 	}
 }

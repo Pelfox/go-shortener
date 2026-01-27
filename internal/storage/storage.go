@@ -1,4 +1,4 @@
-package internal
+package storage
 
 import (
 	"context"
@@ -9,6 +9,7 @@ import (
 	"os"
 	"sync"
 
+	"github.com/Pelfox/go-shortener/pkg"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -21,7 +22,17 @@ var (
 	ErrIDCollision = errors.New("redirect with given ID already exists")
 	// ErrNotFound указывает на то, что короткая ссылка с запрашиваемым ID не найдена.
 	ErrNotFound = errors.New("redirect with given ID not found")
+	// ErrInvalidContext указывает на то, что не удалось найти пользовательский ID в контексте.
+	ErrInvalidContext = errors.New("the provided context is invalid")
 )
+
+// ShortenedLink - единичная репрезентация одной ссылки в хранилище.
+type ShortenedLink struct {
+	// ShortID это короткий ID для ссылки.
+	ShortID string
+	// OriginalURL это изначальный URL от пользователя.
+	OriginalURL string
+}
 
 // Storage определяет интерфейс для хранения и получения коротких ссылок.
 type Storage interface {
@@ -31,6 +42,8 @@ type Storage interface {
 	Get(ctx context.Context, id string) (string, error)
 	// GetByDestination возвращает ID короткой ссылки по исходному URL.
 	GetByDestination(ctx context.Context, destination string) (string, error)
+	// GetForUser возвращает все созданные этим пользователем сокращения.
+	GetForUser(ctx context.Context) ([]ShortenedLink, error)
 
 	// Load загружает данные из системы хранения (файл, БД, пр.) в хранилище.
 	Load() error
@@ -41,19 +54,29 @@ type Storage interface {
 // NewStorageFromConfig выбирает PostgreSQL-хранилище при заданной строке
 // подключения, иначе использует in-memory хранилище.
 func NewStorageFromConfig(logger zerolog.Logger, filePath string, pool *pgxpool.Pool) Storage {
+	logger = logger.With().Str("component", "storage").Logger()
 	if pool == nil {
-		logger.Info().Msg("using in-memory storage")
+		logger.Info().Str("file", filePath).Msg("using in-memory storage")
 		return NewInMemoryStorage(filePath)
 	}
-	logger.Info().Msg("using database storage")
+	logger.Info().Msg("using database-backed storage")
 	return NewPostgresStorage(pool)
+}
+
+// redirect - объект, который используется InMemoryStorage для сохранения
+// ссылок в память.
+type redirect struct {
+	// Destination - конечный URL пользователя.
+	Destination string `json:"destination"`
+	// UserID - ID пользователя, который создал эту переадресацию.
+	UserID string `json:"user_id"`
 }
 
 // InMemoryStorage реализует интерфейс Storage, используя в памяти карту для
 // хранения коротких ссылок.
 type InMemoryStorage struct {
 	mutex     *sync.RWMutex
-	redirects map[string]string // ключ = ID для короткой ссылки, значение = исходная URL
+	redirects map[string]redirect // ключ = ID для короткой ссылки, значение = исходная URL
 	filePath  string
 }
 
@@ -61,12 +84,39 @@ type InMemoryStorage struct {
 func NewInMemoryStorage(filePath string) *InMemoryStorage {
 	return &InMemoryStorage{
 		mutex:     &sync.RWMutex{},
-		redirects: make(map[string]string),
+		redirects: make(map[string]redirect),
 		filePath:  filePath,
 	}
 }
 
-func (s *InMemoryStorage) Store(_ context.Context, id string, destination string) error {
+func (s *InMemoryStorage) GetForUser(ctx context.Context) ([]ShortenedLink, error) {
+	userID, ok := ctx.Value(pkg.ContextUserIDKey).(string)
+	if !ok {
+		return nil, ErrInvalidContext
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	redirects := make([]ShortenedLink, 0)
+	for k, v := range s.redirects {
+		if v.UserID == userID {
+			redirects = append(redirects, ShortenedLink{
+				ShortID:     k,
+				OriginalURL: v.Destination,
+			})
+		}
+	}
+
+	return redirects, nil
+}
+
+func (s *InMemoryStorage) Store(ctx context.Context, id string, destination string) error {
+	userID, ok := ctx.Value(pkg.ContextUserIDKey).(string)
+	if !ok {
+		return ErrInvalidContext
+	}
+
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
@@ -74,7 +124,10 @@ func (s *InMemoryStorage) Store(_ context.Context, id string, destination string
 		return ErrIDCollision
 	}
 
-	s.redirects[id] = destination
+	s.redirects[id] = redirect{
+		Destination: destination,
+		UserID:      userID,
+	}
 	return nil
 }
 
@@ -86,7 +139,7 @@ func (s *InMemoryStorage) Get(_ context.Context, id string) (string, error) {
 	if !exists {
 		return "", ErrNotFound
 	}
-	return destination, nil
+	return destination.Destination, nil
 }
 
 func (s *InMemoryStorage) GetByDestination(_ context.Context, destination string) (string, error) {
@@ -94,7 +147,7 @@ func (s *InMemoryStorage) GetByDestination(_ context.Context, destination string
 	defer s.mutex.RUnlock()
 
 	for id, dest := range s.redirects {
-		if dest == destination {
+		if dest.Destination == destination {
 			return id, nil
 		}
 	}
@@ -121,7 +174,7 @@ func (s *InMemoryStorage) Load() error {
 		return nil // файл пустой, ничего загружать не нужно
 	}
 
-	var fileData map[string]string
+	var fileData map[string]redirect
 	if err := json.Unmarshal(data, &fileData); err != nil {
 		return fmt.Errorf("could not unmarshal data from file %q: %w", s.filePath, err)
 	}
@@ -160,11 +213,54 @@ func NewPostgresStorage(pool *pgxpool.Pool) *PostgresStorage {
 	return &PostgresStorage{pool: pool}
 }
 
+func (s PostgresStorage) GetForUser(ctx context.Context) ([]ShortenedLink, error) {
+	userID, ok := ctx.Value(pkg.ContextUserIDKey).(string)
+	if !ok {
+		return nil, ErrInvalidContext
+	}
+
+	rows, err := s.pool.Query(ctx,
+		`SELECT slug, destination FROM links WHERE user_id = $1`,
+		userID,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build query to get all user links: %w", err)
+	}
+	defer rows.Close()
+
+	var links []ShortenedLink
+	for rows.Next() {
+		var link ShortenedLink
+		err := rows.Scan(&link.ShortID, &link.OriginalURL)
+		if err != nil {
+			return nil, fmt.Errorf("failed to map user created link: %w", err)
+		}
+		links = append(links, link)
+	}
+
+	if rows.Err() != nil {
+		return nil, rows.Err()
+	}
+
+	return links, nil
+}
+
 func (s PostgresStorage) Store(ctx context.Context, id string, destination string) error {
-	_, err := s.pool.Exec(ctx, "INSERT INTO links (slug, destination) VALUES ($1, $2)", id, destination)
+	userID, ok := ctx.Value(pkg.ContextUserIDKey).(string)
+	if !ok {
+		return ErrInvalidContext
+	}
+
+	_, err := s.pool.Exec(
+		ctx,
+		"INSERT INTO links (slug, destination, user_id) VALUES ($1, $2, $3)",
+		id,
+		destination,
+		userID,
+	)
 	if err != nil {
 		var pgErr *pgconn.PgError
-		// 23505 — уникальность ключей нарушена
+		// 23505 - нарушение уникальности ключей
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
 			return ErrIDCollision
 		}

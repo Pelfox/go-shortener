@@ -10,7 +10,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-func setupLogger(t *testing.T) (*bytes.Buffer, zerolog.Logger) {
+func prepareLogger(t *testing.T) (*bytes.Buffer, zerolog.Logger) {
 	t.Helper()
 	var buf bytes.Buffer
 	return &buf, zerolog.New(&buf).With().Timestamp().Logger()
@@ -18,15 +18,15 @@ func setupLogger(t *testing.T) (*bytes.Buffer, zerolog.Logger) {
 
 // Тестирует LoggerMiddleware для 200-х запросов.
 func TestLoggerMiddleware(t *testing.T) {
-	buf, logger := setupLogger(t)
+	buf, logger := prepareLogger(t)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
 
-	rr := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/test", nil)
-	LoggerMiddleware(logger)(next).ServeHTTP(rr, req)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/test", nil)
+	LoggerMiddleware(logger)(next).ServeHTTP(recorder, request)
 
 	var logEntry map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &logEntry); err != nil {
@@ -52,14 +52,14 @@ func TestLoggerMiddleware(t *testing.T) {
 
 // Тестирует LoggerMiddleware для 404 запросов.
 func TestLoggerMiddleware_NotFound(t *testing.T) {
-	buf, logger := setupLogger(t)
+	buf, logger := prepareLogger(t)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/missing", nil)
-	rr := httptest.NewRecorder()
-	LoggerMiddleware(logger)(next).ServeHTTP(rr, req)
+	request := httptest.NewRequest(http.MethodGet, "/missing", nil)
+	recorder := httptest.NewRecorder()
+	LoggerMiddleware(logger)(next).ServeHTTP(recorder, request)
 
 	var entry map[string]any
 	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {

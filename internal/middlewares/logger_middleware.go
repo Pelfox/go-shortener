@@ -10,6 +10,8 @@ import (
 
 // LoggerMiddleware логирует информацию о каждом HTTP-запросе.
 func LoggerMiddleware(logger zerolog.Logger) func(handler http.Handler) http.Handler {
+	logger = logger.With().Str("middleware", "logger").Logger()
+
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			wrappedWriter := middleware.NewWrapResponseWriter(w, r.ProtoMajor)

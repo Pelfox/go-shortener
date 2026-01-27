@@ -1,21 +1,24 @@
-package internal
+package storage
 
 import (
 	"context"
 	"errors"
 	"path/filepath"
 	"testing"
+
+	"github.com/Pelfox/go-shortener/pkg"
 )
 
-func newTestStorage(t *testing.T) *InMemoryStorage {
+func prepareTestStorage(t *testing.T) (*InMemoryStorage, context.Context) {
 	t.Helper()
-	return NewInMemoryStorage(filepath.Join(t.TempDir(), "storage.json"))
+	ctx := context.WithValue(t.Context(), pkg.ContextUserIDKey, "user_123")
+	storage := NewInMemoryStorage(filepath.Join(t.TempDir(), "storage.json"))
+	return storage, ctx
 }
 
 // Тестирует сохранение и получение значений в InMemoryStorage.
 func TestInMemoryStorage_StoreAndGet(t *testing.T) {
-	storage := newTestStorage(t)
-	ctx := context.Background()
+	storage, ctx := prepareTestStorage(t)
 
 	err := storage.Store(ctx, "abc123", "https://google.com")
 	if err != nil {
@@ -34,8 +37,7 @@ func TestInMemoryStorage_StoreAndGet(t *testing.T) {
 
 // Тестирует поиск короткой ссылки по исходному URL.
 func TestInMemoryStorage_GetByDestination(t *testing.T) {
-	storage := newTestStorage(t)
-	ctx := context.Background()
+	storage, ctx := prepareTestStorage(t)
 
 	if err := storage.Store(ctx, "abc123", "https://example.com"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -57,8 +59,7 @@ func TestInMemoryStorage_GetByDestination(t *testing.T) {
 
 // Тестирует обработку коллизий при сохранении в InMemoryStorage.
 func TestInMemoryStorage_StoreCollision(t *testing.T) {
-	storage := newTestStorage(t)
-	ctx := context.Background()
+	storage, ctx := prepareTestStorage(t)
 
 	if err := storage.Store(ctx, "id", "url1"); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -72,8 +73,7 @@ func TestInMemoryStorage_StoreCollision(t *testing.T) {
 
 // Тестирует получение несуществующего ключа из InMemoryStorage.
 func TestInMemoryStorage_GetNotFound(t *testing.T) {
-	storage := newTestStorage(t)
-	ctx := context.Background()
+	storage, ctx := prepareTestStorage(t)
 
 	_, err := storage.Get(ctx, "missing")
 	if !errors.Is(err, ErrNotFound) {
@@ -83,8 +83,7 @@ func TestInMemoryStorage_GetNotFound(t *testing.T) {
 
 // Тестирует сохранение и загрузку данных из файла в InMemoryStorage.
 func TestInMemoryStorage_SaveAndLoad(t *testing.T) {
-	storage := newTestStorage(t)
-	ctx := context.Background()
+	storage, ctx := prepareTestStorage(t)
 
 	if err := storage.Store(ctx, "id1", "https://example.com"); err != nil {
 		t.Fatalf("store failed: %v", err)

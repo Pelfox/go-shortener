@@ -5,6 +5,8 @@ import (
 	"io"
 	"net/http"
 	"strings"
+
+	"github.com/rs/zerolog"
 )
 
 type gzipResponseWriter struct {
@@ -57,27 +59,34 @@ func (w *gzipResponseWriter) Close() error {
 }
 
 // CompressMiddleware компрессирует ответы и декомпрессирует запросы.
-func CompressMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// получили запрос с gzip-содержимым в теле
-		if r.Header.Get("Content-Encoding") == "gzip" {
-			gzipReader, err := gzip.NewReader(r.Body)
-			if err != nil {
-				http.Error(w, "Invalid body.", http.StatusBadRequest)
+func CompressMiddleware(logger zerolog.Logger) func(handler http.Handler) http.Handler {
+	logger = logger.With().Str("middleware", "compress").Logger()
+
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// получили запрос с gzip-содержимым в теле
+			if r.Header.Get("Content-Encoding") == "gzip" {
+				gzipReader, err := gzip.NewReader(r.Body)
+				if err != nil {
+					logger.Error().Err(err).Msg("failed to read gzip-compressed body")
+					http.Error(w, "Invalid body.", http.StatusBadRequest)
+					return
+				}
+				defer gzipReader.Close()
+				r.Body = io.NopCloser(gzipReader)
+			}
+
+			// клиент не поддерживает компрессию gzip
+			if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+				logger.Info().Msg("client does not support gzip")
+				next.ServeHTTP(w, r)
 				return
 			}
-			defer gzipReader.Close()
-			r.Body = io.NopCloser(gzipReader)
-		}
 
-		// клиент не поддерживает компрессию gzip
-		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
-			next.ServeHTTP(w, r)
-			return
-		}
-
-		writer := &gzipResponseWriter{ResponseWriter: w}
-		defer writer.Close()
-		next.ServeHTTP(writer, r)
-	})
+			writer := &gzipResponseWriter{ResponseWriter: w}
+			defer writer.Close()
+			next.ServeHTTP(writer, r)
+			logger.Info().Msg("serving the request with gzip compression")
+		})
+	}
 }
