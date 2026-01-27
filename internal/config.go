@@ -13,6 +13,8 @@ type AppConfig struct {
 	BaseURL string
 	// FilePath это путь к файлу для хранения ссылок.
 	FilePath string
+	// DatabaseDSN это строка подключения к базе данных.
+	DatabaseDSN string
 }
 
 func getConfigValue(envName string, flagValue *string) string {
@@ -32,15 +34,18 @@ func ParseAppConfig() *AppConfig {
 	hostFlag := flag.String("a", "localhost:8080", "Адрес, на котором будет запущен HTTP сервер.")
 	urlPrefixFlag := flag.String("b", "http://localhost:8080/", "Префикс для коротких URL.")
 	fileFlag := flag.String("f", "urls.json", "Файл для сохранения URL.")
+	databaseDSNFlag := flag.String("d", "postgres://postgres:postgres@localhost:5432/postgres", "Строка подключения к базе данных.")
 	flag.Parse()
 
 	host := getConfigValue("SERVER_ADDRESS", hostFlag)
 	urlPrefix := getConfigValue("BASE_URL", urlPrefixFlag)
 	filePath := getConfigValue("FILE_STORAGE_PATH", fileFlag)
+	databaseDSN := getConfigValue("DATABASE_DSN", databaseDSNFlag)
 
 	return &AppConfig{
-		Addr:     host,
-		BaseURL:  urlPrefix,
-		FilePath: filePath,
+		Addr:        host,
+		BaseURL:     urlPrefix,
+		FilePath:    filePath,
+		DatabaseDSN: databaseDSN,
 	}
 }

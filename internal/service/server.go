@@ -17,6 +17,7 @@ import (
 	"github.com/Pelfox/go-shortener/pkg"
 	"github.com/Pelfox/go-shortener/pkg/schemas"
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog"
 )
 
@@ -32,9 +33,11 @@ type Server struct {
 	addr    string
 	baseURL string
 
-	router  *chi.Mux
+	router *chi.Mux
+	logger zerolog.Logger
+
 	storage internal.Storage
-	logger  zerolog.Logger
+	pool    *pgxpool.Pool
 }
 
 // NewServer создаёт и настраивает новый экземпляр Server.
@@ -44,6 +47,7 @@ func NewServer(
 	logger zerolog.Logger,
 	middlewareLogger zerolog.Logger,
 	storage internal.Storage,
+	pool *pgxpool.Pool,
 ) *Server {
 	router := chi.NewRouter()
 	router.Use(middlewares.LoggerMiddleware(middlewareLogger))
@@ -55,10 +59,12 @@ func NewServer(
 		router:  router,
 		storage: storage,
 		logger:  logger,
+		pool:    pool,
 	}
 
 	router.Post("/", server.handleCreationRequest)
 	router.Post("/api/shorten", server.handleShortenRequest)
+	router.Get("/ping", server.handlePingRequest)
 	router.Get("/*", server.handleShortRequest)
 
 	return server
@@ -191,6 +197,16 @@ func (s *Server) handleShortRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	http.Redirect(w, r, destination, http.StatusTemporaryRedirect)
+}
+
+func (s *Server) handlePingRequest(w http.ResponseWriter, r *http.Request) {
+	if err := s.pool.Ping(r.Context()); err != nil {
+		s.logger.Error().Err(err).Msg("failed to ping database")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 // ServeHTTP запускает HTTP-сервер и обрабатывает завершение работы.

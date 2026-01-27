@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 
 	"github.com/Pelfox/go-shortener/internal"
@@ -18,7 +19,14 @@ func main() {
 		Str("component", "logger-middleware").
 		Logger()
 
+	ctx := context.Background()
 	appConfig := internal.ParseAppConfig()
+
+	pool, err := internal.NewDatabase(ctx, appConfig.DatabaseDSN)
+	if err != nil {
+		serverLogger.Fatal().Err(err).Msg("failed to connect to database")
+	}
+	defer pool.Close()
 
 	storage := internal.NewInMemoryStorage(appConfig.FilePath)
 	server := service.NewServer(
@@ -27,6 +35,7 @@ func main() {
 		serverLogger,
 		middlewareLogger,
 		storage,
+		pool,
 	)
 
 	if err := server.ServeHTTP(); err != nil {
