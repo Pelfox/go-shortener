@@ -70,10 +70,22 @@ func NewServer(
 	return server
 }
 
-func (s *Server) createShortLink(ctx context.Context, destination string) (string, error) {
+func (s *Server) createShortLink(ctx context.Context, destination string) (string, bool, error) {
 	destination = strings.TrimSpace(destination)
 	if destination == "" {
-		return "", errDestinationEmpty
+		return "", false, errDestinationEmpty
+	}
+
+	existingID, err := s.storage.GetByDestination(ctx, destination)
+	if err == nil {
+		shortURL, err := url.JoinPath(s.baseURL, existingID)
+		if err != nil {
+			return "", false, err
+		}
+		return shortURL, true, nil
+	}
+	if !errors.Is(err, internal.ErrNotFound) {
+		return "", false, err
 	}
 
 	for i := 0; i < maxGenerateAttempts; i++ {
@@ -82,18 +94,18 @@ func (s *Server) createShortLink(ctx context.Context, destination string) (strin
 			if errors.Is(err, internal.ErrIDCollision) {
 				continue // попытка снова при коллизии
 			}
-			return "", err
+			return "", false, err
 		}
 
 		shortURL, err := url.JoinPath(s.baseURL, shortID)
 		if err != nil {
-			return "", err
+			return "", false, err
 		}
 
-		return shortURL, nil
+		return shortURL, false, nil
 	}
 
-	return "", errors.New("failed to generate a unique short ID")
+	return "", false, errors.New("failed to generate a unique short ID")
 }
 
 func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
@@ -110,7 +122,7 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 	}
 	defer r.Body.Close()
 
-	shortLink, err := s.createShortLink(r.Context(), string(body))
+	shortLink, conflict, err := s.createShortLink(r.Context(), string(body))
 	if err != nil {
 		if errors.Is(err, errDestinationEmpty) {
 			http.Error(w, "The destination URL is empty.", http.StatusBadRequest)
@@ -122,7 +134,11 @@ func (s *Server) handleCreationRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "text/plain")
-	w.WriteHeader(http.StatusCreated)
+	if conflict {
+		w.WriteHeader(http.StatusConflict)
+	} else {
+		w.WriteHeader(http.StatusCreated)
+	}
 	w.Write([]byte(shortLink))
 
 	s.logger.Info().Str("slug", shortLink).
@@ -151,7 +167,7 @@ func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortLink, err := s.createShortLink(r.Context(), request.URL)
+	shortLink, conflict, err := s.createShortLink(r.Context(), request.URL)
 	if err != nil {
 		if errors.Is(err, errDestinationEmpty) {
 			http.Error(w, "The destination URL is empty.", http.StatusBadRequest)
@@ -171,7 +187,11 @@ func (s *Server) handleShortenRequest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusCreated)
+	if conflict {
+		w.WriteHeader(http.StatusConflict)
+	} else {
+		w.WriteHeader(http.StatusCreated)
+	}
 	w.Write(responseBody)
 
 	s.logger.Info().Str("slug", shortLink).

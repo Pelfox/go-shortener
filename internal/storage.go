@@ -29,6 +29,8 @@ type Storage interface {
 	Store(ctx context.Context, id string, destination string) error
 	// Get возвращает URL назначения для короткой ссылки с заданным ID.
 	Get(ctx context.Context, id string) (string, error)
+	// GetByDestination возвращает ID короткой ссылки по исходному URL.
+	GetByDestination(ctx context.Context, destination string) (string, error)
 
 	// Load загружает данные из системы хранения (файл, БД, пр.) в хранилище.
 	Load() error
@@ -85,6 +87,19 @@ func (s *InMemoryStorage) Get(_ context.Context, id string) (string, error) {
 		return "", ErrNotFound
 	}
 	return destination, nil
+}
+
+func (s *InMemoryStorage) GetByDestination(_ context.Context, destination string) (string, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	for id, dest := range s.redirects {
+		if dest == destination {
+			return id, nil
+		}
+	}
+
+	return "", ErrNotFound
 }
 
 func (s *InMemoryStorage) Load() error {
@@ -168,6 +183,18 @@ func (s PostgresStorage) Get(ctx context.Context, id string) (string, error) {
 		return "", fmt.Errorf("could not get link: %w", err)
 	}
 	return destination, nil
+}
+
+func (s PostgresStorage) GetByDestination(ctx context.Context, destination string) (string, error) {
+	var slug string
+	err := s.pool.QueryRow(ctx, "SELECT slug FROM links WHERE destination = $1", destination).Scan(&slug)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("could not get link by destination: %w", err)
+	}
+	return slug, nil
 }
 
 func (s PostgresStorage) Load() error {

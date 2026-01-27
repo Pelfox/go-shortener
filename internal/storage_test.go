@@ -32,6 +32,29 @@ func TestInMemoryStorage_StoreAndGet(t *testing.T) {
 	}
 }
 
+// Тестирует поиск короткой ссылки по исходному URL.
+func TestInMemoryStorage_GetByDestination(t *testing.T) {
+	storage := newTestStorage(t)
+	ctx := context.Background()
+
+	if err := storage.Store(ctx, "abc123", "https://example.com"); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	id, err := storage.GetByDestination(ctx, "https://example.com")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if id != "abc123" {
+		t.Fatalf("expected %q, got %q", "abc123", id)
+	}
+
+	if _, err := storage.GetByDestination(ctx, "https://missing.com"); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+}
+
 // Тестирует обработку коллизий при сохранении в InMemoryStorage.
 func TestInMemoryStorage_StoreCollision(t *testing.T) {
 	storage := newTestStorage(t)
