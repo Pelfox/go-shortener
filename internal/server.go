@@ -22,6 +22,8 @@ type Server struct {
 	router  *chi.Mux
 	logger  zerolog.Logger
 	storage storage.Storage
+
+	ctx context.Context
 }
 
 // NewServer создаёт и настраивает новый экземпляр Server.
@@ -40,13 +42,22 @@ func NewServer(
 	router.Use(middlewares.CompressMiddleware(logger))
 	router.Use(middlewares.AuthMiddleware(userService, logger))
 
+	ctx, _ := signal.NotifyContext(
+		context.Background(),
+		os.Interrupt,
+		syscall.SIGTERM,
+	)
 	server := &Server{
 		addr:    addr,
 		router:  router,
 		logger:  logger,
 		storage: storageInstance,
+		ctx:     ctx,
 	}
-	shortenerService := services.NewShortenerService(baseURL, storageInstance)
+
+	// создаём новый ключевой сервис и запускаем фоновый очиститель
+	shortenerService := services.NewShortenerService(ctx, baseURL, storageInstance, logger)
+	shortenerService.StartBackgroundCleaner()
 
 	plainHandler := handlers.NewPlainHandler(shortenerService, logger)
 	router.Post("/", plainHandler.Create)
@@ -56,6 +67,7 @@ func NewServer(
 		r.Post("/shorten", apiHandler.Create)
 		r.Post("/shorten/batch", apiHandler.CreateBatch)
 		r.Get("/user/urls", apiHandler.GetUserLinks)
+		r.Delete("/user/urls", apiHandler.DeleteBatch)
 	})
 
 	healthHandler := handlers.NewHealthHandler(pool, logger)
@@ -78,13 +90,6 @@ func (s *Server) ServeHTTP() error {
 		Handler: s.router,
 	}
 
-	ctx, stop := signal.NotifyContext(
-		context.Background(),
-		os.Interrupt,
-		syscall.SIGTERM,
-	)
-	defer stop()
-
 	go func() {
 		s.logger.Info().Str("addr", s.addr).Msg("starting server")
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -92,7 +97,7 @@ func (s *Server) ServeHTTP() error {
 		}
 	}()
 
-	<-ctx.Done()
+	<-s.ctx.Done()
 	if err := s.storage.Save(); err != nil {
 		return err
 	}

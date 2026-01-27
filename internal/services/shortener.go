@@ -5,10 +5,12 @@ import (
 	"errors"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/Pelfox/go-shortener/internal/storage"
 	"github.com/Pelfox/go-shortener/pkg"
 	"github.com/Pelfox/go-shortener/pkg/schemas"
+	"github.com/rs/zerolog"
 )
 
 // maxGenerateAttempts указывает на максимальное количество попыток генерации
@@ -26,19 +28,37 @@ var (
 	// ErrDestinationNotFound указывает, что для данного короткого ID не
 	// существует финальной ссылки.
 	ErrDestinationNotFound = errors.New("no destination for this short ID")
+	// ErrDeleted указывает на то что данная ссылка была помечена как удалённая.
+	ErrDeleted = errors.New("this link has been deleted")
 )
 
-// ShortenerService реализует логику сокращения и хранения ссылок.
+type deleteTask struct {
+	UserID   string
+	ShortIDs []string
+}
+
+// ShortenerService реализует логику сокращения ссылок.
 type ShortenerService struct {
-	baseURL string
-	storage storage.Storage
+	ctx        context.Context
+	baseURL    string
+	storage    storage.Storage
+	deleteChan chan deleteTask
+	logger     zerolog.Logger
 }
 
 // NewShortenerService создаёт и возвращает новый экземпляр сервиса сокращения ссылок.
-func NewShortenerService(baseURL string, storage storage.Storage) *ShortenerService {
+func NewShortenerService(
+	ctx context.Context,
+	baseURL string,
+	storage storage.Storage,
+	parentLogger zerolog.Logger,
+) *ShortenerService {
 	return &ShortenerService{
-		baseURL: baseURL,
-		storage: storage,
+		ctx:        ctx,
+		baseURL:    baseURL,
+		storage:    storage,
+		deleteChan: make(chan deleteTask, 50), // TODO: должно ли это быть настраиваемым через конфиг?
+		logger:     parentLogger.With().Str("service", "shortener").Logger(),
 	}
 }
 
@@ -54,6 +74,9 @@ func (s *ShortenerService) GetDestination(ctx context.Context, shortID string) (
 	if err != nil {
 		if errors.Is(err, storage.ErrNotFound) {
 			return "", ErrDestinationNotFound
+		}
+		if errors.Is(err, storage.ErrDeleted) {
+			return "", ErrDeleted
 		}
 		return "", err
 	}
@@ -129,4 +152,73 @@ func (s *ShortenerService) GetUserLinks(ctx context.Context) ([]schemas.Shortene
 	}
 
 	return userLinks, nil
+}
+
+func (s *ShortenerService) processBatchedDeletion(batchTasks []deleteTask) {
+	for _, task := range batchTasks {
+		if err := s.storage.MarkDelete(s.ctx, task.UserID, task.ShortIDs); err != nil {
+			s.logger.Error().Err(err).
+				Str("user", task.UserID).
+				Msg("failed to mark link as deleted")
+		}
+	}
+}
+
+// StartBackgroundCleaner запускает goroutine, которая последовательно очищает
+// накопившиеся запросы на удаление ссылок, либо каждые 10 запросов, либо раз в
+// 500 миллисекунд.
+func (s *ShortenerService) StartBackgroundCleaner() {
+	const (
+		maxBatchSize = 10
+		flushTimeout = 500 * time.Millisecond
+	)
+
+	s.logger.Info().Int("maxBatchSize", maxBatchSize).
+		Dur("flushTimeout", flushTimeout).
+		Msg("starting background cleaner")
+
+	batchTasks := make([]deleteTask, 0, maxBatchSize)
+	ticker := time.NewTicker(flushTimeout)
+
+	go func() {
+		defer ticker.Stop()
+		for {
+			select {
+			case task := <-s.deleteChan:
+				batchTasks = append(batchTasks, task)
+				if len(batchTasks) >= maxBatchSize {
+					s.processBatchedDeletion(batchTasks)
+					batchTasks = batchTasks[:0]
+				}
+			case <-ticker.C:
+				if len(batchTasks) > 0 {
+					s.processBatchedDeletion(batchTasks)
+					batchTasks = batchTasks[:0]
+				}
+			case <-s.ctx.Done():
+				// дообрабатываем все оставшиеся запросы на удаление
+				s.processBatchedDeletion(batchTasks)
+				return
+			}
+		}
+	}()
+}
+
+// DeleteBatch отправляет запрос на удаление сразу нескольких коротких ID ссылок.
+func (s *ShortenerService) DeleteBatch(ctx context.Context, shortIDs []string) error {
+	userID, ok := ctx.Value(pkg.ContextUserIDKey).(string)
+	if !ok {
+		return storage.ErrInvalidContext
+	}
+
+	select {
+	case s.deleteChan <- deleteTask{
+		UserID:   userID,
+		ShortIDs: shortIDs,
+	}:
+		return nil
+	default:
+		s.logger.Warn().Msg("delete queue is full, dropping task")
+	}
+	return nil
 }
