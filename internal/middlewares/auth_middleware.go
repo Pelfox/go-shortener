@@ -30,6 +30,7 @@ func AuthMiddleware(
 
 				// кука валидна, ставим пользовательский ID в контекст запроса
 				if err == nil {
+					logger.Info().Str("user_id", userID).Msg("user is authenticated")
 					userContext := context.WithValue(r.Context(), pkg.ContextUserIDKey, userID)
 					next.ServeHTTP(w, r.WithContext(userContext))
 					return

@@ -34,16 +34,18 @@ func TestAuthMiddleware_NoCookie(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	recorder := httptest.NewRecorder()
 
-	AuthMiddleware(userService, logger)(next).ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	AuthMiddleware(userService, logger)(next).ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", recorder.Code)
 	}
 
-	cookies := rec.Result().Cookies()
+	response := recorder.Result()
+	defer response.Body.Close()
+
+	cookies := response.Cookies()
 	if len(cookies) != 1 {
 		t.Fatalf("expected 1 cookie, got %d", len(cookies))
 	}
@@ -59,7 +61,6 @@ func TestAuthMiddleware_ValidCookie(t *testing.T) {
 	userService := prepareUserService(t)
 
 	userID, cookieValue := userService.CreateUserCookie()
-
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ctxUserID := r.Context().Value(pkg.ContextUserIDKey)
 		if ctxUserID != userID {
@@ -68,17 +69,17 @@ func TestAuthMiddleware_ValidCookie(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{
 		Name:  cookieName,
 		Value: cookieValue,
 	})
 
-	rec := httptest.NewRecorder()
-	AuthMiddleware(userService, logger)(next).ServeHTTP(rec, req)
+	recorder := httptest.NewRecorder()
+	AuthMiddleware(userService, logger)(next).ServeHTTP(recorder, request)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 OK, got %d", rec.Code)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %d", recorder.Code)
 	}
 }
 
@@ -91,17 +92,17 @@ func TestAuthMiddleware_InvalidCookie(t *testing.T) {
 		t.Fatal("next handler must not be called on invalid cookie")
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(&http.Cookie{
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.AddCookie(&http.Cookie{
 		Name:  cookieName,
 		Value: "invalid.cookie.value",
 	})
 
-	rec := httptest.NewRecorder()
-	AuthMiddleware(userService, logger)(next).ServeHTTP(rec, req)
+	recorder := httptest.NewRecorder()
+	AuthMiddleware(userService, logger)(next).ServeHTTP(recorder, request)
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 Unauthorized, got %d", rec.Code)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 Unauthorized, got %d", recorder.Code)
 	}
 }
 
@@ -115,11 +116,10 @@ func TestAuthMiddleware_CallsNextHandler(t *testing.T) {
 		called = true
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	rec := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	recorder := httptest.NewRecorder()
 
-	AuthMiddleware(userService, logger)(next).ServeHTTP(rec, req)
-
+	AuthMiddleware(userService, logger)(next).ServeHTTP(recorder, request)
 	if !called {
 		t.Fatal("expected next handler to be called")
 	}
