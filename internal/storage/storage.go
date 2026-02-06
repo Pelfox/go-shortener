@@ -22,8 +22,14 @@ var (
 	ErrIDCollision = errors.New("redirect with given ID already exists")
 	// ErrNotFound указывает на то, что короткая ссылка с запрашиваемым ID не найдена.
 	ErrNotFound = errors.New("redirect with given ID not found")
-	// ErrInvalidContext указывает на то, что не удалось найти пользовательский ID в контексте.
+	// ErrInvalidContext указывает на то, что не удалось найти пользовательский
+	// ID в контексте.
 	ErrInvalidContext = errors.New("the provided context is invalid")
+	// ErrNotAuthorized указывает на то, что пользователь не имеет права на
+	// выполнение данной операции над ссылкой.
+	ErrNotAuthorized = errors.New("user is not an owner of the redirect")
+	// ErrDeleted указывает на то, что данная ссылка была удалена.
+	ErrDeleted = errors.New("redirect with given ID has been deleted")
 )
 
 // ShortenedLink - единичная репрезентация одной ссылки в хранилище.
@@ -32,6 +38,8 @@ type ShortenedLink struct {
 	ShortID string
 	// OriginalURL это изначальный URL от пользователя.
 	OriginalURL string
+	// IsDeleted определяет, была ли удалена ссылка.
+	IsDeleted bool
 }
 
 // Storage определяет интерфейс для хранения и получения коротких ссылок.
@@ -44,6 +52,8 @@ type Storage interface {
 	GetByDestination(ctx context.Context, destination string) (string, error)
 	// GetForUser возвращает все созданные этим пользователем сокращения.
 	GetForUser(ctx context.Context) ([]ShortenedLink, error)
+	// MarkDelete помечает ссылку для удаления.
+	MarkDelete(ctx context.Context, userID string, shortIDs []string) error
 
 	// Load загружает данные из системы хранения (файл, БД, пр.) в хранилище.
 	Load() error
@@ -70,13 +80,15 @@ type redirect struct {
 	Destination string `json:"destination"`
 	// UserID - ID пользователя, который создал эту переадресацию.
 	UserID string `json:"user_id"`
+	// IsDeleted - была ли удалена ссылка.
+	IsDeleted bool `json:"is_deleted"`
 }
 
 // InMemoryStorage реализует интерфейс Storage, используя в памяти карту для
 // хранения коротких ссылок.
 type InMemoryStorage struct {
 	mutex     *sync.RWMutex
-	redirects map[string]redirect // ключ = ID для короткой ссылки, значение = исходная URL
+	redirects map[string]*redirect // ключ = ID для короткой ссылки, значение = исходная URL
 	filePath  string
 }
 
@@ -84,9 +96,34 @@ type InMemoryStorage struct {
 func NewInMemoryStorage(filePath string) *InMemoryStorage {
 	return &InMemoryStorage{
 		mutex:     &sync.RWMutex{},
-		redirects: make(map[string]redirect),
+		redirects: make(map[string]*redirect),
 		filePath:  filePath,
 	}
+}
+
+func (s *InMemoryStorage) MarkDelete(_ context.Context, userID string, shortIDs []string) error {
+	// лишний раз не блокируем мьютекс
+	if len(shortIDs) == 0 {
+		return nil
+	}
+
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	for _, shortID := range shortIDs {
+		r, ok := s.redirects[shortID]
+		if !ok {
+			return ErrNotFound
+		}
+
+		if r.UserID != userID {
+			return ErrNotAuthorized
+		}
+
+		r.IsDeleted = true
+	}
+
+	return nil
 }
 
 func (s *InMemoryStorage) GetForUser(ctx context.Context) ([]ShortenedLink, error) {
@@ -95,12 +132,13 @@ func (s *InMemoryStorage) GetForUser(ctx context.Context) ([]ShortenedLink, erro
 		return nil, ErrInvalidContext
 	}
 
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
 
 	redirects := make([]ShortenedLink, 0)
 	for k, v := range s.redirects {
-		if v.UserID == userID {
+		// не показываем удалённые ссылки
+		if v.UserID == userID && !v.IsDeleted {
 			redirects = append(redirects, ShortenedLink{
 				ShortID:     k,
 				OriginalURL: v.Destination,
@@ -124,9 +162,10 @@ func (s *InMemoryStorage) Store(ctx context.Context, id string, destination stri
 		return ErrIDCollision
 	}
 
-	s.redirects[id] = redirect{
+	s.redirects[id] = &redirect{
 		Destination: destination,
 		UserID:      userID,
+		IsDeleted:   false,
 	}
 	return nil
 }
@@ -135,11 +174,16 @@ func (s *InMemoryStorage) Get(_ context.Context, id string) (string, error) {
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	destination, exists := s.redirects[id]
+	r, exists := s.redirects[id]
 	if !exists {
 		return "", ErrNotFound
 	}
-	return destination.Destination, nil
+
+	if r.IsDeleted {
+		return "", ErrDeleted
+	}
+
+	return r.Destination, nil
 }
 
 func (s *InMemoryStorage) GetByDestination(_ context.Context, destination string) (string, error) {
@@ -174,7 +218,7 @@ func (s *InMemoryStorage) Load() error {
 		return nil // файл пустой, ничего загружать не нужно
 	}
 
-	var fileData map[string]redirect
+	var fileData map[string]*redirect
 	if err := json.Unmarshal(data, &fileData); err != nil {
 		return fmt.Errorf("could not unmarshal data from file %q: %w", s.filePath, err)
 	}
@@ -211,6 +255,19 @@ type PostgresStorage struct {
 // NewPostgresStorage создаёт новый экземпляр PostgresStorage.
 func NewPostgresStorage(pool *pgxpool.Pool) *PostgresStorage {
 	return &PostgresStorage{pool: pool}
+}
+
+func (s PostgresStorage) MarkDelete(ctx context.Context, userID string, shortIDs []string) error {
+	if len(shortIDs) == 0 {
+		return nil
+	}
+	_, err := s.pool.Exec(
+		ctx,
+		"UPDATE links SET is_deleted = true WHERE user_id = $1 AND slug = ANY($2) AND is_deleted = false",
+		userID,
+		shortIDs,
+	)
+	return err
 }
 
 func (s PostgresStorage) GetForUser(ctx context.Context) ([]ShortenedLink, error) {

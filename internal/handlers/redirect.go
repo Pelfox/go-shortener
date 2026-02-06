@@ -41,6 +41,10 @@ func (h *RedirectHandler) Redirect(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "Destination not found", http.StatusNotFound)
 			return
 		}
+		if errors.Is(err, services.ErrDeleted) {
+			w.WriteHeader(http.StatusGone)
+			return
+		}
 		h.logger.Error().Err(err).Msg("failed to process the redirection")
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return

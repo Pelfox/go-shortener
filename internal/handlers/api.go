@@ -180,3 +180,35 @@ func (h *APIHandler) GetUserLinks(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	w.Write(responseBody)
 }
+
+// DeleteBatch удаляет все указанные ссылки (асинхронно, через fan-in).
+func (h *APIHandler) DeleteBatch(w http.ResponseWriter, r *http.Request) {
+	contentType := r.Header.Get("Content-Type")
+	if !strings.HasPrefix(strings.ToLower(contentType), "application/json") {
+		http.Error(w, "Invalid content type.", http.StatusBadRequest)
+		return
+	}
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to read the request body")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+	defer r.Body.Close()
+
+	var shortIDs []string
+	if err := json.Unmarshal(body, &shortIDs); err != nil {
+		h.logger.Error().Err(err).Msg("failed to parse the request body")
+		http.Error(w, "Invalid body.", http.StatusBadRequest)
+		return
+	}
+
+	if err := h.shortenerService.DeleteBatch(r.Context(), shortIDs); err != nil {
+		h.logger.Error().Err(err).Msg("failed to delete shortened links")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusAccepted)
+}

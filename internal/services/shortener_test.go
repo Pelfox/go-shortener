@@ -3,21 +3,27 @@ package services
 import (
 	"context"
 	"errors"
+	"io"
 	"path/filepath"
 	"testing"
 
 	"github.com/Pelfox/go-shortener/internal/storage"
 	"github.com/Pelfox/go-shortener/pkg"
+	"github.com/rs/zerolog"
 )
 
 func prepareShortenerService(t *testing.T) *ShortenerService {
 	t.Helper()
-
 	storageInstance := storage.NewInMemoryStorage(
 		filepath.Join(t.TempDir(), "urls.json"),
 	)
 
-	return NewShortenerService("http://localhost", storageInstance)
+	return NewShortenerService(
+		context.Background(),
+		"http://localhost",
+		storageInstance,
+		zerolog.New(io.Discard),
+	)
 }
 
 func prepareShortenerServiceContext(t *testing.T) context.Context {
