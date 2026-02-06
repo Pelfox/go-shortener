@@ -9,33 +9,41 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/rs/zerolog"
 )
+
+func prepareCompressLogger(t *testing.T) zerolog.Logger {
+	t.Helper()
+	return zerolog.New(io.Discard)
+}
 
 // Тестирует компрессию для JSON.
 func TestCompressMiddleware_GzipJsonResponse(t *testing.T) {
+	logger := prepareCompressLogger(t)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]string{"message": "hello world"})
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api/data", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
+	request := httptest.NewRequest(http.MethodGet, "/api/data", nil)
+	request.Header.Set("Accept-Encoding", "gzip")
 
-	rr := httptest.NewRecorder()
-	CompressMiddleware(next).ServeHTTP(rr, req)
+	recorder := httptest.NewRecorder()
+	CompressMiddleware(logger)(next).ServeHTTP(recorder, request)
 
-	if rr.Header().Get("Content-Encoding") != "gzip" {
+	if recorder.Header().Get("Content-Encoding") != "gzip" {
 		t.Fatal("expected Content-Encoding: gzip")
 	}
-	if cl := rr.Header().Get("Content-Length"); cl != "" {
+	if cl := recorder.Header().Get("Content-Length"); cl != "" {
 		t.Fatalf("expected Content-Length to be removed, got %q", cl)
 	}
-	if vary := rr.Header().Get("Vary"); !strings.Contains(vary, "Accept-Encoding") {
+	if vary := recorder.Header().Get("Vary"); !strings.Contains(vary, "Accept-Encoding") {
 		t.Fatalf("expected Vary to include Accept-Encoding, got %q", vary)
 	}
 
-	reader, err := gzip.NewReader(rr.Body)
+	reader, err := gzip.NewReader(recorder.Body)
 	if err != nil {
 		t.Fatalf("failed to create gzip reader: %v", err)
 	}
@@ -57,22 +65,23 @@ func TestCompressMiddleware_GzipJsonResponse(t *testing.T) {
 
 // Тестирует компрессию для HTML.
 func TestCompressMiddleware_GzipHtmlResponse(t *testing.T) {
+	logger := prepareCompressLogger(t)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write([]byte("<html><body>Hello</body></html>"))
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
+	request := httptest.NewRequest(http.MethodGet, "/", nil)
+	request.Header.Set("Accept-Encoding", "gzip")
 
-	rr := httptest.NewRecorder()
-	CompressMiddleware(next).ServeHTTP(rr, req)
+	recorder := httptest.NewRecorder()
+	CompressMiddleware(logger)(next).ServeHTTP(recorder, request)
 
-	if rr.Header().Get("Content-Encoding") != "gzip" {
+	if recorder.Header().Get("Content-Encoding") != "gzip" {
 		t.Fatal("expected Content-Encoding: gzip")
 	}
 
-	reader, err := gzip.NewReader(rr.Body)
+	reader, err := gzip.NewReader(recorder.Body)
 	if err != nil {
 		t.Fatalf("failed to create gzip reader: %v", err)
 	}
@@ -90,60 +99,63 @@ func TestCompressMiddleware_GzipHtmlResponse(t *testing.T) {
 
 // Тестируем отсутствие компрессии для других типов контента.
 func TestCompressMiddleware_NoGzipForOtherContentTypes(t *testing.T) {
+	logger := prepareCompressLogger(t)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain")
 		w.Write([]byte("plain text response"))
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
-	req.Header.Set("Accept-Encoding", "gzip")
+	request := httptest.NewRequest(http.MethodGet, "/file.txt", nil)
+	request.Header.Set("Accept-Encoding", "gzip")
 
-	rr := httptest.NewRecorder()
-	CompressMiddleware(next).ServeHTTP(rr, req)
+	recorder := httptest.NewRecorder()
+	CompressMiddleware(logger)(next).ServeHTTP(recorder, request)
 
-	if enc := rr.Header().Get("Content-Encoding"); enc != "" {
+	if enc := recorder.Header().Get("Content-Encoding"); enc != "" {
 		t.Fatalf("expected no Content-Encoding, got %q", enc)
 	}
 
-	if rr.Body.String() != "plain text response" {
-		t.Fatalf("expected raw body, got %q", rr.Body.String())
+	if recorder.Body.String() != "plain text response" {
+		t.Fatalf("expected raw body, got %q", recorder.Body.String())
 	}
 }
 
 // Тестируем без поддержки компрессии gzip.
 func TestCompressMiddleware_NoAcceptGzip(t *testing.T) {
+	logger := prepareCompressLogger(t)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{"data": "value"})
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/api", nil)
-	rr := httptest.NewRecorder()
-	CompressMiddleware(next).ServeHTTP(rr, req)
+	request := httptest.NewRequest(http.MethodGet, "/api", nil)
+	recorder := httptest.NewRecorder()
+	CompressMiddleware(logger)(next).ServeHTTP(recorder, request)
 
-	if rr.Header().Get("Content-Encoding") == "gzip" {
+	if recorder.Header().Get("Content-Encoding") == "gzip" {
 		t.Fatal("did not expect Content-Encoding: gzip")
 	}
 
 	var data map[string]string
-	if err := json.NewDecoder(rr.Body).Decode(&data); err != nil {
+	if err := json.NewDecoder(recorder.Body).Decode(&data); err != nil {
 		t.Fatalf("failed to decode uncompressed JSON: %v", err)
 	}
 }
 
 // Тестируем невалидное тело с gzip.
 func TestCompressMiddleware_InvalidGzippedRequest(t *testing.T) {
+	logger := prepareCompressLogger(t)
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("handler should not be called on invalid gzip")
 	})
 
-	req := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader("not valid gzip"))
-	req.Header.Set("Content-Encoding", "gzip")
+	request := httptest.NewRequest(http.MethodPost, "/upload", strings.NewReader("not valid gzip"))
+	request.Header.Set("Content-Encoding", "gzip")
 
-	rr := httptest.NewRecorder()
-	CompressMiddleware(next).ServeHTTP(rr, req)
+	recorder := httptest.NewRecorder()
+	CompressMiddleware(logger)(next).ServeHTTP(recorder, request)
 
-	if rr.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 Bad Request on invalid gzip, got %d", rr.Code)
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("expected '400 Bad Request' on invalid gzip, got %d", recorder.Code)
 	}
 }

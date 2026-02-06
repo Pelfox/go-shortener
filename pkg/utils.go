@@ -25,3 +25,9 @@ func GenerateShortID(length int) string {
 
 	return string(result)
 }
+
+// GenerateUserID генерирует псевдослучайную строку с ID пользователя, используя
+// GenerateShortID "под капотом".
+func GenerateUserID() string {
+	return GenerateShortID(16)
+}
