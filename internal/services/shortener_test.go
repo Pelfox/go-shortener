@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Pelfox/go-shortener/internal/audit"
 	"github.com/Pelfox/go-shortener/internal/storage"
 	"github.com/Pelfox/go-shortener/pkg"
 	"github.com/rs/zerolog"
@@ -23,6 +24,7 @@ func prepareShortenerService(t *testing.T) *ShortenerService {
 		"http://localhost",
 		storageInstance,
 		zerolog.New(io.Discard),
+		[]audit.Provider{},
 	)
 }
 

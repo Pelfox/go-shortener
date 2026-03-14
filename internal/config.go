@@ -17,6 +17,10 @@ type AppConfig struct {
 	DatabaseDSN string
 	// Secret это секрет для HMAC генерации пользовательского ID.
 	Secret []byte
+	// AuditFile это путь к файлу для сохранения аудит-событий.
+	AuditFile string
+	// AuditURL это полный URL до сервера аудит-событий.
+	AuditURL string
 }
 
 func getConfigValue(envName string, flagValue *string) string {
@@ -38,6 +42,8 @@ func ParseAppConfig() *AppConfig {
 	fileFlag := flag.String("f", "urls.json", "Файл для сохранения URL.")
 	databaseDSNFlag := flag.String("d", "", "Строка подключения к базе данных. Пустое значение отключает БД.")
 	secretFlag := flag.String("s", "", "Секрет для HMAC.")
+	auditFileFlag := flag.String("audit-file", "", "Путь к файлу для сохранения аудит событий.")
+	auditURLFlag := flag.String("audit-url", "", "Полный URL для аудит сервера.")
 	flag.Parse()
 
 	host := getConfigValue("SERVER_ADDRESS", hostFlag)
@@ -45,6 +51,8 @@ func ParseAppConfig() *AppConfig {
 	filePath := getConfigValue("FILE_STORAGE_PATH", fileFlag)
 	databaseDSN := getConfigValue("DATABASE_DSN", databaseDSNFlag)
 	secret := getConfigValue("SECRET", secretFlag)
+	auditFile := getConfigValue("AUDIT_FILE", auditFileFlag)
+	auditURL := getConfigValue("AUDIT_URL", auditURLFlag)
 
 	return &AppConfig{
 		Addr:        host,
@@ -52,5 +60,7 @@ func ParseAppConfig() *AppConfig {
 		FilePath:    filePath,
 		DatabaseDSN: databaseDSN,
 		Secret:      []byte(secret),
+		AuditFile:   auditFile,
+		AuditURL:    auditURL,
 	}
 }

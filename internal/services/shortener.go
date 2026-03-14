@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Pelfox/go-shortener/internal/audit"
 	"github.com/Pelfox/go-shortener/internal/storage"
 	"github.com/Pelfox/go-shortener/pkg"
 	"github.com/Pelfox/go-shortener/pkg/schemas"
@@ -44,6 +45,7 @@ type ShortenerService struct {
 	storage    storage.Storage
 	deleteChan chan deleteTask
 	logger     zerolog.Logger
+	providers  []audit.Provider
 }
 
 // NewShortenerService создаёт и возвращает новый экземпляр сервиса сокращения ссылок.
@@ -52,6 +54,7 @@ func NewShortenerService(
 	baseURL string,
 	storage storage.Storage,
 	parentLogger zerolog.Logger,
+	providers []audit.Provider,
 ) *ShortenerService {
 	return &ShortenerService{
 		ctx:        ctx,
@@ -59,6 +62,7 @@ func NewShortenerService(
 		storage:    storage,
 		deleteChan: make(chan deleteTask, 50), // TODO: должно ли это быть настраиваемым через конфиг?
 		logger:     parentLogger.With().Str("service", "shortener").Logger(),
+		providers:  providers,
 	}
 }
 
@@ -81,7 +85,26 @@ func (s *ShortenerService) GetDestination(ctx context.Context, shortID string) (
 		return "", err
 	}
 
+	s.notifyAuditProviders(ctx, audit.AuditActionTypeFollow, destination)
 	return destination, nil
+}
+
+// notifyAuditProviders сообщает каждому провайдеру аудит-системы о новом событии.
+func (s *ShortenerService) notifyAuditProviders(
+	ctx context.Context,
+	actionType audit.ActionType,
+	url string,
+) {
+	var userID *string = nil
+	if uID, ok := ctx.Value(pkg.ContextUserIDKey).(string); ok {
+		userID = &uID
+	}
+
+	for _, provider := range s.providers {
+		if err := provider.Send(ctx, actionType, userID, url); err != nil {
+			s.logger.Error().Err(err).Msg("failed to notify audit provider")
+		}
+	}
 }
 
 // CreateShortLink сокращает переданную ссылку. Если ссылка уже была сокращена -
@@ -124,6 +147,7 @@ func (s *ShortenerService) CreateShortLink(ctx context.Context, destination stri
 			return "", false, err
 		}
 
+		s.notifyAuditProviders(ctx, audit.AuditActionTypeShorten, destination)
 		return shortURL, false, nil
 	}
 
