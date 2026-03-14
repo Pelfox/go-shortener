@@ -3,7 +3,6 @@ package services
 import (
 	"context"
 	"errors"
-	"net/url"
 	"strings"
 	"time"
 
@@ -56,6 +55,7 @@ func NewShortenerService(
 	parentLogger zerolog.Logger,
 	providers []audit.Provider,
 ) *ShortenerService {
+	baseURL = strings.TrimRight(baseURL, "/")
 	return &ShortenerService{
 		ctx:        ctx,
 		baseURL:    baseURL,
@@ -70,7 +70,7 @@ func NewShortenerService(
 // из базы данных.
 func (s *ShortenerService) GetDestination(ctx context.Context, shortID string) (string, error) {
 	shortID = strings.TrimSpace(shortID)
-	if len(shortID) == 0 {
+	if shortID == "" {
 		return "", ErrShortIDEmpty
 	}
 
@@ -87,6 +87,10 @@ func (s *ShortenerService) GetDestination(ctx context.Context, shortID string) (
 
 	s.notifyAuditProviders(ctx, audit.AuditActionTypeFollow, destination)
 	return destination, nil
+}
+
+func (s *ShortenerService) buildShortURL(shortID string) string {
+	return s.baseURL + "/" + shortID
 }
 
 // notifyAuditProviders сообщает каждому провайдеру аудит-системы о новом событии.
@@ -112,20 +116,14 @@ func (s *ShortenerService) notifyAuditProviders(
 // новый короткий ID и сохраняет пару в хранилище.
 func (s *ShortenerService) CreateShortLink(ctx context.Context, destination string) (string, bool, error) {
 	destination = strings.TrimSpace(destination)
-	if len(destination) == 0 {
+	if destination == "" {
 		return "", false, ErrDestinationEmpty
 	}
 
 	// проверяем, существует ли уже короткий ID для данной ссылки
 	existingID, err := s.storage.GetByDestination(ctx, destination)
 	if err == nil {
-		// соединяем базовый URL из конфига и короткий ID
-		shortURL, err := url.JoinPath(s.baseURL, existingID)
-		if err != nil {
-			return "", false, err
-		}
-
-		return shortURL, true, nil
+		return s.buildShortURL(existingID), true, nil
 	}
 	if !errors.Is(err, storage.ErrNotFound) {
 		return "", false, err
@@ -141,14 +139,8 @@ func (s *ShortenerService) CreateShortLink(ctx context.Context, destination stri
 			return "", false, err
 		}
 
-		// соединяем базовый URL из конфига и короткий ID
-		shortURL, err := url.JoinPath(s.baseURL, shortID)
-		if err != nil {
-			return "", false, err
-		}
-
 		s.notifyAuditProviders(ctx, audit.AuditActionTypeShorten, destination)
-		return shortURL, false, nil
+		return s.buildShortURL(shortID), false, nil
 	}
 
 	return "", false, ErrShortIDGenerationFailed
@@ -161,14 +153,9 @@ func (s *ShortenerService) GetUserLinks(ctx context.Context) ([]schemas.Shortene
 		return nil, err
 	}
 
-	userLinks := make([]schemas.ShortenedUserLink, 0)
+	userLinks := make([]schemas.ShortenedUserLink, 0, len(links))
 	for _, link := range links {
-		// соединяем базовый URL из конфига и короткий ID
-		shortURL, err := url.JoinPath(s.baseURL, link.ShortID)
-		if err != nil {
-			return nil, err
-		}
-
+		shortURL := s.buildShortURL(link.ShortID)
 		userLinks = append(userLinks, schemas.ShortenedUserLink{
 			ShortURL:    shortURL,
 			OriginalURL: link.OriginalURL,

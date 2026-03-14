@@ -2,7 +2,6 @@ package services
 
 import (
 	"errors"
-	"fmt"
 
 	"github.com/Pelfox/go-shortener/pkg"
 )
@@ -32,7 +31,7 @@ func (s *UserService) CreateUserCookie() (string, string) {
 	userID := pkg.GenerateUserID()
 	signedUserID := pkg.SignUserCookie(userID, s.secret)
 
-	cookieValue := fmt.Sprintf("%s.%s", userID, signedUserID)
+	cookieValue := userID + "." + signedUserID
 	return userID, cookieValue
 }
 
