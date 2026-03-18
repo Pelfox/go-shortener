@@ -25,7 +25,8 @@ type Server struct {
 	storage   storage.Storage
 	providers []audit.Provider
 
-	ctx context.Context
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewServer создаёт и настраивает новый экземпляр Server.
@@ -50,7 +51,7 @@ func NewServer(
 		providers = append(providers, audit.NewFileProvider(config.AuditFile))
 	}
 
-	ctx, _ := signal.NotifyContext(
+	ctx, cancel := signal.NotifyContext(
 		context.Background(),
 		os.Interrupt,
 		syscall.SIGTERM,
@@ -61,6 +62,7 @@ func NewServer(
 		logger:  logger,
 		storage: storageInstance,
 		ctx:     ctx,
+		cancel:  cancel,
 	}
 
 	// создаём новый ключевой сервис и запускаем фоновый очиститель
@@ -112,6 +114,7 @@ func (s *Server) ServeHTTP() error {
 	}()
 
 	<-s.ctx.Done()
+	s.cancel()
 	if err := s.storage.Save(); err != nil {
 		return err
 	}
