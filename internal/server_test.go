@@ -17,12 +17,20 @@ import (
 
 func prepareServer(t *testing.T) *Server {
 	t.Helper()
-	storageInstance := storage.NewInMemoryStorage(filepath.Join(t.TempDir(), "urls.json"))
+	tempDir := t.TempDir()
+
+	storageInstance := storage.NewInMemoryStorage(filepath.Join(tempDir, "urls.json"))
+	auditFile := filepath.Join(tempDir, "audit.json")
+
+	config := AppConfig{
+		Addr:      "localhost:8080",
+		BaseURL:   "http://localhost:8080/test",
+		Secret:    []byte("very-strong-secret"),
+		AuditFile: auditFile,
+	}
 	return NewServer(
-		"localhost:8080",
-		"http://localhost:8080/test",
+		&config,
 		zerolog.New(io.Discard),
-		[]byte("very-strong-secret"),
 		storageInstance,
 		nil,
 	)

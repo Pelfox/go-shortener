@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/Pelfox/go-shortener/internal/audit"
 	"github.com/Pelfox/go-shortener/internal/handlers"
 	"github.com/Pelfox/go-shortener/internal/middlewares"
 	"github.com/Pelfox/go-shortener/internal/services"
@@ -18,29 +19,36 @@ import (
 )
 
 type Server struct {
-	addr    string
-	router  *chi.Mux
-	logger  zerolog.Logger
-	storage storage.Storage
+	addr      string
+	router    *chi.Mux
+	logger    zerolog.Logger
+	storage   storage.Storage
+	providers []audit.Provider
 
 	ctx context.Context
 }
 
 // NewServer создаёт и настраивает новый экземпляр Server.
 func NewServer(
-	addr string,
-	baseURL string,
+	config *AppConfig,
 	logger zerolog.Logger,
-	secret []byte,
 	storageInstance storage.Storage,
 	pool *pgxpool.Pool,
 ) *Server {
-	userService := services.NewUserService(secret)
+	userService := services.NewUserService(config.Secret)
 
 	router := chi.NewRouter()
 	router.Use(middlewares.LoggerMiddleware(logger))
 	router.Use(middlewares.CompressMiddleware(logger))
 	router.Use(middlewares.AuthMiddleware(userService, logger))
+
+	providers := make([]audit.Provider, 0)
+	if config.AuditURL != "" {
+		providers = append(providers, audit.NewHTTPProvider(config.AuditURL))
+	}
+	if config.AuditFile != "" {
+		providers = append(providers, audit.NewFileProvider(config.AuditFile))
+	}
 
 	ctx, _ := signal.NotifyContext(
 		context.Background(),
@@ -48,7 +56,7 @@ func NewServer(
 		syscall.SIGTERM,
 	)
 	server := &Server{
-		addr:    addr,
+		addr:    config.Addr,
 		router:  router,
 		logger:  logger,
 		storage: storageInstance,
@@ -56,7 +64,13 @@ func NewServer(
 	}
 
 	// создаём новый ключевой сервис и запускаем фоновый очиститель
-	shortenerService := services.NewShortenerService(ctx, baseURL, storageInstance, logger)
+	shortenerService := services.NewShortenerService(
+		ctx,
+		config.BaseURL,
+		storageInstance,
+		logger,
+		providers,
+	)
 	shortenerService.StartBackgroundCleaner()
 
 	plainHandler := handlers.NewPlainHandler(shortenerService, logger)

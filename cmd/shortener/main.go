@@ -12,12 +12,13 @@ import (
 
 func main() {
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
-
 	ctx := context.Background()
 	appConfig := internal.ParseAppConfig()
 
-	var pool *pgxpool.Pool
-	var err error
+	var (
+		pool *pgxpool.Pool
+		err  error
+	)
 
 	if appConfig.DatabaseDSN != "" {
 		if err := storage.RunMigrations(ctx, appConfig.DatabaseDSN, "migrations"); err != nil {
@@ -32,14 +33,7 @@ func main() {
 	}
 
 	storageInstance := storage.NewStorageFromConfig(logger, appConfig.FilePath, pool)
-	server := internal.NewServer(
-		appConfig.Addr,
-		appConfig.BaseURL,
-		logger,
-		appConfig.Secret,
-		storageInstance,
-		pool,
-	)
+	server := internal.NewServer(appConfig, logger, storageInstance, pool)
 
 	if err := server.ServeHTTP(); err != nil {
 		logger.Fatal().Err(err).Msg("failed to start the server")
