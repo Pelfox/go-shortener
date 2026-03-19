@@ -60,7 +60,7 @@ func NewShortenerService(
 		ctx:        ctx,
 		baseURL:    baseURL,
 		storage:    storage,
-		deleteChan: make(chan deleteTask, 50), // TODO: должно ли это быть настраиваемым через конфиг?
+		deleteChan: make(chan deleteTask, 1024), // TODO: должно ли это быть настраиваемым через конфиг?
 		logger:     parentLogger.With().Str("service", "shortener").Logger(),
 		providers:  providers,
 	}
@@ -198,17 +198,19 @@ func (s *ShortenerService) StartBackgroundCleaner() {
 			case task := <-s.deleteChan:
 				batchTasks = append(batchTasks, task)
 				if len(batchTasks) >= maxBatchSize {
-					s.processBatchedDeletion(batchTasks)
-					batchTasks = batchTasks[:0]
+					go s.processBatchedDeletion(batchTasks)
+					batchTasks = make([]deleteTask, 0, maxBatchSize)
 				}
 			case <-ticker.C:
 				if len(batchTasks) > 0 {
-					s.processBatchedDeletion(batchTasks)
-					batchTasks = batchTasks[:0]
+					go s.processBatchedDeletion(batchTasks)
+					batchTasks = make([]deleteTask, 0, maxBatchSize)
 				}
 			case <-s.ctx.Done():
 				// дообрабатываем все оставшиеся запросы на удаление
-				s.processBatchedDeletion(batchTasks)
+				if len(batchTasks) > 0 {
+					s.processBatchedDeletion(batchTasks)
+				}
 				return
 			}
 		}
@@ -222,14 +224,12 @@ func (s *ShortenerService) DeleteBatch(ctx context.Context, shortIDs []string) e
 		return storage.ErrInvalidContext
 	}
 
-	select {
-	case s.deleteChan <- deleteTask{
-		UserID:   userID,
-		ShortIDs: shortIDs,
-	}:
-		return nil
-	default:
-		s.logger.Warn().Msg("delete queue is full, dropping task")
-	}
+	go func() {
+		s.deleteChan <- deleteTask{
+			UserID:   userID,
+			ShortIDs: shortIDs,
+		}
+	}()
+
 	return nil
 }
