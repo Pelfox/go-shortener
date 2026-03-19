@@ -87,7 +87,7 @@ type redirect struct {
 // InMemoryStorage реализует интерфейс Storage, используя в памяти карту для
 // хранения коротких ссылок.
 type InMemoryStorage struct {
-	mutex     *sync.RWMutex
+	mutex     sync.RWMutex
 	redirects map[string]*redirect // ключ = ID для короткой ссылки, значение = исходная URL
 	filePath  string
 }
@@ -95,7 +95,6 @@ type InMemoryStorage struct {
 // NewInMemoryStorage создаёт новый экземпляр InMemoryStorage.
 func NewInMemoryStorage(filePath string) *InMemoryStorage {
 	return &InMemoryStorage{
-		mutex:     &sync.RWMutex{},
 		redirects: make(map[string]*redirect),
 		filePath:  filePath,
 	}
@@ -135,7 +134,7 @@ func (s *InMemoryStorage) GetForUser(ctx context.Context) ([]ShortenedLink, erro
 	s.mutex.RLock()
 	defer s.mutex.RUnlock()
 
-	redirects := make([]ShortenedLink, 0)
+	redirects := make([]ShortenedLink, 0, len(s.redirects))
 	for k, v := range s.redirects {
 		// не показываем удалённые ссылки
 		if v.UserID == userID && !v.IsDeleted {
@@ -239,7 +238,7 @@ func (s *InMemoryStorage) Save() error {
 		return fmt.Errorf("could not marshal data for file %q: %w", s.filePath, err)
 	}
 
-	if err := os.WriteFile(s.filePath, data, 0644); err != nil {
+	if err := os.WriteFile(s.filePath, data, 0o644); err != nil {
 		return fmt.Errorf("could not write data to file %q: %w", s.filePath, err)
 	}
 
