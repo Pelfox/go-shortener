@@ -12,6 +12,7 @@ const (
 	AuditActionTypeFollow ActionType = "follow"
 )
 
+// generate:reset
 // Action представляет событие, записываемое в аудит-лог.
 type Action struct {
 	// Timestamp это числовое представление даты и времени (Unix timestamp).

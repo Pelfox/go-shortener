@@ -37,6 +37,7 @@ type deleteTask struct {
 	ShortIDs []string
 }
 
+// generate:reset
 // ShortenerService реализует логику сокращения ссылок.
 type ShortenerService struct {
 	ctx        context.Context

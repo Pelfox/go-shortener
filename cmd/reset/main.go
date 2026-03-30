@@ -1,0 +1,300 @@
+package main
+
+import (
+	"bytes"
+	"fmt"
+	"go/ast"
+	"go/format"
+	"go/token"
+	"log"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"golang.org/x/tools/go/packages"
+)
+
+// StructInfo описывает одну уникальную структуру внутри пакета.
+type StructInfo struct {
+	// Name это название структуры.
+	Name string
+	// Fields это все доступные поля структуры.
+	Fields []ast.Field
+}
+
+// PackageInfo описывает уникальный пакет, найденный при сканировании,
+// требующий кодогенерации (и его структуры).
+type PackageInfo struct {
+	// Name это название пакета.
+	Name string
+	// Dir это путь до данного пакета.
+	Dir string
+	// Structs это все найденные структуры для кодогенерации.
+	Structs []StructInfo
+}
+
+// getPackageDir получает файловый путь до переданного пакета.
+func getPackageDir(pkg *packages.Package) string {
+	files := pkg.CompiledGoFiles
+	if len(files) == 0 {
+		files = pkg.GoFiles
+	}
+	// не было найдено ни единого файла, путь нам неизвестен
+	if len(files) == 0 {
+		return ""
+	}
+	return filepath.Dir(files[0])
+}
+
+// includesGenerateResetComment проверяет, содержит ли текущая группа
+// комментариев комментарий-триггер для кодогенерации.
+func includesGenerateResetComment(document *ast.CommentGroup) bool {
+	if document == nil {
+		return false
+	}
+	for _, comment := range document.List {
+		content := strings.TrimSpace(strings.TrimPrefix(comment.Text, "//"))
+		if content == "generate:reset" {
+			return true
+		}
+	}
+	return false
+}
+
+// scanDirectoryPackages сканирует переданную директорию на наличие пакетов для
+// кодогенерации и возвращает их.
+func scanDirectoryPackages(root string) ([]PackageInfo, error) {
+	fmt.Printf("Сканируем директорию %s на наличие пакетов...\n", root)
+	config := &packages.Config{
+		Dir:  root,
+		Mode: packages.NeedName | packages.NeedFiles | packages.NeedCompiledGoFiles | packages.NeedSyntax,
+	}
+
+	loaded, err := packages.Load(config, "./...")
+	if err != nil {
+		return nil, fmt.Errorf("failed to load packages: %w", err)
+	}
+
+	if packages.PrintErrors(loaded) > 0 {
+		return nil, fmt.Errorf("packages contain errors")
+	}
+
+	result := make([]PackageInfo, 0, len(loaded))
+	for _, pkg := range loaded {
+		// пропускаем пустые пакеты
+		if pkg.Name == "" || len(pkg.Syntax) == 0 {
+			continue
+		}
+
+		// находим папку с пакетом, а неизвестные - пропускаем
+		packageDir := getPackageDir(pkg)
+		if packageDir == "" {
+			continue
+		}
+
+		fmt.Printf("Найден пакет %s в директории %s\n", pkg.Name, packageDir)
+		info := PackageInfo{
+			Name: pkg.Name,
+			Dir:  packageDir,
+		}
+
+		// проходимся по каждому файлу из пакета
+		for _, file := range pkg.Syntax {
+			for _, declaration := range file.Decls {
+				// ищем декларации (type ...)
+				generator, ok := declaration.(*ast.GenDecl)
+				if !ok || generator.Tok != token.TYPE {
+					continue
+				}
+
+				// нам нужны лишь файлы, которые запрашивают кодогенерацию
+				if !includesGenerateResetComment(generator.Doc) {
+					continue
+				}
+
+				for _, spec := range generator.Specs {
+					// нам нужны декларации вида `Name Type`
+					typeSpec, ok := spec.(*ast.TypeSpec)
+					if !ok {
+						continue
+					}
+
+					// нам нужны лишь структуры (сбрасываем именно их)
+					structType, ok := typeSpec.Type.(*ast.StructType)
+					if !ok {
+						continue
+					}
+
+					// получаем все поля структуры
+					fields := make([]ast.Field, len(structType.Fields.List))
+					for i, field := range structType.Fields.List {
+						fields[i] = *field
+					}
+
+					info.Structs = append(info.Structs, StructInfo{
+						Name:   typeSpec.Name.Name,
+						Fields: fields,
+					})
+
+					fmt.Printf(
+						"Завершено сканирование %s. Найдено %d поля(ей)\n",
+						typeSpec.Name.Name,
+						len(fields),
+					)
+				}
+			}
+		}
+
+		// добавляем пакет в финальный слайс только в случае, если у нас есть хотя бы
+		// одна структура для кодогенерации
+		if len(info.Structs) > 0 {
+			result = append(result, info)
+		}
+	}
+
+	return result, nil
+}
+
+// isPrimitive возвращает true в случае, если переданный тип является простым.
+func isPrimitive(typeName string) bool {
+	switch typeName {
+	case "bool", "string", "int", "int8", "int16", "int32", "int64", "uint",
+		"uint8", "uint16", "uint32", "uint64", "uintptr", "byte", "float32",
+		"float64", "rune", "complex32", "complex64":
+		return true
+	default:
+		return false
+	}
+}
+
+// zeroValue возвращает нулевое значение для данного типа.
+func zeroValue(typeName string) string {
+	switch typeName {
+	case "string":
+		return `""`
+	case "bool":
+		return "false"
+	default:
+		return "0"
+	}
+}
+
+// exprString конвертирует AST-выражение в строку кода (к примеру, тип).
+func exprString(expr ast.Expr) string {
+	var buf bytes.Buffer
+	_ = format.Node(&buf, token.NewFileSet(), expr)
+	return buf.String()
+}
+
+// generatePackageResetFile генерирует файл сброса для данного пакета.
+func generatePackageResetFile(pkg PackageInfo) error {
+	var contents bytes.Buffer
+
+	// записываем заголовок файла и название пакета
+	fmt.Fprint(&contents, "// Code generated by cmd/reset. DO NOT EDIT!\n\n")
+	fmt.Fprintf(&contents, "package %s\n\n", pkg.Name)
+
+	for _, st := range pkg.Structs {
+		prefix := "s"
+
+		// записываем декларацию функции и проверку значения структуры на nil
+		fmt.Fprintf(&contents, "func (%s *%s) Reset() {\n", prefix, st.Name)
+		fmt.Fprintf(&contents, "\tif %s == nil {\n", prefix)
+		fmt.Fprint(&contents, "\t\treturn\n")
+		fmt.Fprint(&contents, "\t}\n\n")
+
+		for _, field := range st.Fields {
+			for _, name := range field.Names {
+				fieldName := prefix + "." + name.Name
+
+				switch t := field.Type.(type) {
+				case *ast.Ident:
+					if isPrimitive(t.Name) {
+						fmt.Fprintf(&contents, "\t%s = %s\n", fieldName, zeroValue(t.Name))
+						continue
+					}
+					fmt.Fprintf(&contents, "\tif resetter, ok := any(&%s).(interface{ Reset() }); ok{\n", fieldName)
+					fmt.Fprint(&contents, "\t\tresetter.Reset()\n")
+					fmt.Fprint(&contents, "\t}\n")
+				case *ast.ArrayType:
+					// если для массива не задана длина
+					if t.Len == nil {
+						fmt.Fprintf(&contents, "\tif %s != nil {\n", fieldName)
+						fmt.Fprintf(&contents, "\t\t%s = %s[:0]\n", fieldName, fieldName)
+						fmt.Fprint(&contents, "\t}\n")
+						continue
+					}
+					fmt.Fprintf(&contents, "\t%s = %s{}\n", fieldName, exprString(field.Type))
+				case *ast.MapType:
+					fmt.Fprintf(&contents, "\tif %s != nil {\n", fieldName)
+					fmt.Fprintf(&contents, "\t\tclear(%s)\n", fieldName)
+					fmt.Fprint(&contents, "\t}\n")
+				case *ast.StarExpr:
+					fmt.Fprintf(&contents, "\tif %s != nil {\n", fieldName)
+
+					switch inner := t.X.(type) {
+					case *ast.Ident:
+						if isPrimitive(inner.Name) {
+							fmt.Fprintf(&contents, "\t\t*%s = %s\n", fieldName, zeroValue(inner.Name))
+						} else {
+							fmt.Fprintf(&contents, "\t\tif resetter, ok := any(%s).(interface{ Reset() }); ok {\n", fieldName)
+							fmt.Fprint(&contents, "\t\t\tresetter.Reset()\n")
+							fmt.Fprint(&contents, "\t\t}\n")
+						}
+					case *ast.ArrayType:
+						// указатель на слайс: *[]T
+						if inner.Len == nil {
+							fmt.Fprintf(&contents, "\t\t*%s = (*%s)[:0]\n", fieldName, fieldName)
+						} else {
+							fmt.Fprintf(&contents, "\t\t*%s = %s{}\n", fieldName, exprString(inner))
+						}
+					case *ast.MapType:
+						// указатель на map: *map[K]V
+						fmt.Fprintf(&contents, "\t\tclear(*%s)\n", fieldName)
+					default:
+						fmt.Fprintf(&contents, "\t\tif resetter, ok := any(%s).(interface{ Reset() }); ok {\n", fieldName)
+						fmt.Fprint(&contents, "\t\t\tresetter.Reset()\n")
+						fmt.Fprint(&contents, "\t\t}\n")
+					}
+
+					fmt.Fprint(&contents, "\t}\n")
+				}
+			}
+		}
+
+		fmt.Fprint(&contents, "}\n")
+		fmt.Fprintln(&contents)
+	}
+
+	source, err := format.Source(contents.Bytes())
+	if err != nil {
+		return fmt.Errorf("failed to format reset file: %w", err)
+	}
+
+	filename := filepath.Join(pkg.Dir, "reset.gen.go")
+	return os.WriteFile(filename, source, 0o644)
+}
+
+func main() {
+	cwd, err := os.Getwd()
+	if err != nil {
+		log.Fatalf("failed to get working directory: %v\n", err)
+	}
+
+	pkgs, err := scanDirectoryPackages(cwd)
+	if err != nil {
+		log.Fatalf("failed to scan directory for packages: %v\n", err)
+	}
+
+	wroteFiles := 0
+	for _, pkg := range pkgs {
+		fmt.Printf("Генерация файла сброса для пакета %s...\n", pkg.Name)
+		if err := generatePackageResetFile(pkg); err != nil {
+			fmt.Printf("Не удаётся сгенерировать файл сброса для %s: %v\n", pkg.Name, err)
+			continue
+		}
+		wroteFiles++
+	}
+
+	fmt.Printf("Генерация завершена. Обработано %d файлов\n", wroteFiles)
+}
