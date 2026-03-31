@@ -17,17 +17,27 @@ var (
 	buildCommit  string
 )
 
+// BuildInfo описывает информацию о текущей сборке программы.
+type BuildInfo struct {
+	// Version это текущая версия программы.
+	Version string
+	// Date это время, когда была осуществлена данная сборка.
+	Date string
+	// Commit это хэш коммита, который привязан к данной сборке.
+	Commit string
+}
+
 // printBuildInfo выводит информацию о текущей сборке.
-func printBuildInfo() {
-	version := buildVersion
+func printBuildInfo(info BuildInfo) {
+	version := info.Version
 	if version == "" {
 		version = "N/A"
 	}
-	date := buildDate
+	date := info.Date
 	if date == "" {
 		date = "N/A"
 	}
-	commit := buildCommit
+	commit := info.Commit
 	if commit == "" {
 		commit = "N/A"
 	}
@@ -38,7 +48,11 @@ func printBuildInfo() {
 }
 
 func main() {
-	printBuildInfo()
+	printBuildInfo(BuildInfo{
+		Version: buildVersion,
+		Date:    buildDate,
+		Commit:  buildCommit,
+	})
 
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	ctx := context.Background()
