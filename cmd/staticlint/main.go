@@ -147,8 +147,9 @@ func main() {
 		// Публичные анализаторы
 		errcheck.Analyzer,
 		nilerr.Analyzer,
-		// Собственная реализация анализатора на запрет os.Exit в main
-		DenyExitInMainAnalyzer,
+		// Собственная реализация анализатора на запрет os.Exit, log.Fatal и panic
+		// вне main.main
+		DenyPanicOutsideMain,
 	}
 
 	// Static Analyzers от staticcheck
