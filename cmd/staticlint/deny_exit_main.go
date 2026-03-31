@@ -42,7 +42,14 @@ func denyExitInMain(pass *analysis.Pass) (any, error) {
 					return true
 				}
 
-				if selector.Sel.Name == "Exit" {
+				// получение левой части выражения (до точки)
+				ident, ok := selector.X.(*ast.Ident)
+				if !ok {
+					return true
+				}
+
+				// выбрасываем предупреждение только на os.Exit
+				if ident.Name == "os" && selector.Sel.Name == "Exit" {
 					pass.Reportf(call.Pos(), "direct call to os.Exit in main.main is forbidden")
 				}
 
