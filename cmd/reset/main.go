@@ -160,7 +160,7 @@ func isPrimitive(typeName string) bool {
 	switch typeName {
 	case "bool", "string", "int", "int8", "int16", "int32", "int64", "uint",
 		"uint8", "uint16", "uint32", "uint64", "uintptr", "byte", "float32",
-		"float64", "rune", "complex32", "complex64":
+		"float64", "rune", "complex64", "complex128":
 		return true
 	default:
 		return false

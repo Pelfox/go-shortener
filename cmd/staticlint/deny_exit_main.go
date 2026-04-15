@@ -6,28 +6,20 @@ import (
 	"golang.org/x/tools/go/analysis"
 )
 
-// DenyExitInMainAnalyzer запрещает использование функции Exit пакета os в main
-// функции пакета main.
-//
-// Использование данной функции разрешено в других файлах кода, и проверка
-// выполняется лишь для main.main.
-var DenyExitInMainAnalyzer = &analysis.Analyzer{
-	Name: "deny_exit_main",
-	Doc:  "Запрещает использовать os.Exit в main",
-	Run:  denyExitInMain,
+// DenyPanicOutsideMain запрещает использование os.Exit, log.Fatal и panic вне
+// функции main.main.
+var DenyPanicOutsideMain = &analysis.Analyzer{
+	Name: "deny_panic_outside_main",
+	Doc:  "Запрещает использовать os.Exit, log.Fatal и panic вне main.main.",
+	Run:  denyPanicOutsideMain,
 }
 
-func denyExitInMain(pass *analysis.Pass) (any, error) {
-	// проверяем лишь main пакет
-	if pass.Pkg == nil || pass.Pkg.Name() != "main" {
-		return nil, nil
-	}
-
+func denyPanicOutsideMain(pass *analysis.Pass) (any, error) {
 	for _, file := range pass.Files {
 		for _, declaration := range file.Decls {
 			fn, ok := declaration.(*ast.FuncDecl)
-			// проверяем только функции с названием main
-			if !ok || fn.Name.Name != "main" {
+			// вызывать панику/exit в main.main можно
+			if !ok || (pass.Pkg.Name() == "main" && fn.Name.Name == "main") {
 				continue
 			}
 
@@ -37,13 +29,33 @@ func denyExitInMain(pass *analysis.Pass) (any, error) {
 					return true
 				}
 
+				// проверка на вызов функции panic
+				if ident, ok := call.Fun.(*ast.Ident); ok {
+					if ident.Name == "panic" {
+						pass.Reportf(call.Pos(), "panic() call is forbidden outside main.main")
+					}
+					return true
+				}
+
 				selector, ok := call.Fun.(*ast.SelectorExpr)
 				if !ok || selector.Sel == nil {
 					return true
 				}
 
-				if selector.Sel.Name == "Exit" {
-					pass.Reportf(call.Pos(), "direct call to os.Exit in main.main is forbidden")
+				// получение левой части выражения (до точки)
+				ident, ok := selector.X.(*ast.Ident)
+				if !ok {
+					return true
+				}
+
+				// выбрасываем предупреждение только на os.Exit
+				if ident.Name == "os" && selector.Sel.Name == "Exit" {
+					pass.Reportf(call.Pos(), "call to os.Exit() outside main.main is forbidden")
+				}
+
+				// проверяем на log.Fatal
+				if ident.Name == "log" && selector.Sel.Name == "Fatal" {
+					pass.Reportf(call.Pos(), "call to log.Fatal() outside main.main is forbidden")
 				}
 
 				return true
