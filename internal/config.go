@@ -5,6 +5,7 @@ import (
 	"os"
 )
 
+// generate:reset
 // AppConfig хранит конфигурацию приложения.
 type AppConfig struct {
 	// Addr это адрес для HTTP-сервера.

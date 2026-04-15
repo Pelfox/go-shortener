@@ -9,6 +9,7 @@ import (
 	"time"
 )
 
+// generate:reset
 // HTTPProvider реализует провайдера аудита через HTTP.
 type HTTPProvider struct {
 	client   *http.Client
