@@ -61,8 +61,9 @@ func NewServer(
 
 	ctx, cancel := signal.NotifyContext(
 		context.Background(),
-		os.Interrupt,
+		os.Interrupt, // Эквивалентно syscall.SIGINT
 		syscall.SIGTERM,
+		syscall.SIGQUIT,
 	)
 	server := &Server{
 		addr:        config.Addr,
