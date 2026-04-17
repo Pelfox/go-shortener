@@ -8,7 +8,6 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// generate:reset
 // AppConfig хранит конфигурацию приложения.
 type AppConfig struct {
 	// Addr это адрес для HTTP-сервера.
