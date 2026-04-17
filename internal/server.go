@@ -2,19 +2,12 @@ package internal
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/rsa"
-	"crypto/x509"
-	"crypto/x509/pkix"
-	"encoding/pem"
 	"errors"
 	"fmt"
-	"math/big"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
 	"github.com/Pelfox/go-shortener/internal/audit"
 	"github.com/Pelfox/go-shortener/internal/handlers"
@@ -121,8 +114,9 @@ func (s *Server) ServeHTTP() error {
 		s.logger.Info().Str("addr", s.addr).Msg("starting server")
 		var err error
 		if s.enableHTTPS {
-			if err = ensureCerts("cert.pem", "key.pem"); err != nil {
-				s.logger.Error().Err(err).Msg("failed to generate certs")
+			if err = validateCertFiles("cert.pem", "key.pem"); err != nil {
+				s.logger.Error().Err(err).Msg("tls certificates validation failed")
+				return
 			}
 			err = server.ListenAndServeTLS("cert.pem", "key.pem")
 		} else {
@@ -143,49 +137,15 @@ func (s *Server) ServeHTTP() error {
 	return server.Shutdown(context.Background())
 }
 
-// ensureCerts проверяет наличие сертификатов и генерирует их в случае отсутствия.
-func ensureCerts(certFile, keyFile string) error {
-	if _, err := os.Stat(certFile); err == nil {
-		return nil
+// validateCertFiles проверяет наличие и доступность TLS-сертификата и ключа.
+func validateCertFiles(certFile, keyFile string) error {
+	if _, err := os.Stat(certFile); err != nil {
+		return fmt.Errorf("failed to access certificate file %q: %w", certFile, err)
 	}
 
-	cert := &x509.Certificate{
-		SerialNumber: big.NewInt(1658),
-		Subject: pkix.Name{
-			Organization: []string{"Yandex.Practicum"},
-			Country:      []string{"RU"},
-		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(1, 0, 0),
-		IsCA:                  true,
-		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageServerAuth},
-		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageCertSign,
-		BasicConstraintsValid: true,
+	if _, err := os.Stat(keyFile); err != nil {
+		return fmt.Errorf("failed to access private key file %q: %w", keyFile, err)
 	}
-
-	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
-	if err != nil {
-		return fmt.Errorf("failed to generate a private key: %w", err)
-	}
-
-	certBytes, err := x509.CreateCertificate(rand.Reader, cert, cert, &privateKey.PublicKey, privateKey)
-	if err != nil {
-		return fmt.Errorf("failed to create the certificate: %w", err)
-	}
-
-	certOut, err := os.Create(certFile)
-	if err != nil {
-		return fmt.Errorf("failed to save certificate: %w", err)
-	}
-	defer certOut.Close()
-	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: certBytes})
-
-	keyOut, err := os.OpenFile(keyFile, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
-	if err != nil {
-		return fmt.Errorf("failed to save private key: %w", err)
-	}
-	defer keyOut.Close()
-	pem.Encode(keyOut, &pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(privateKey)})
 
 	return nil
 }
