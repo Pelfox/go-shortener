@@ -22,6 +22,8 @@ type AppConfig struct {
 	AuditFile string
 	// AuditURL это полный URL до сервера аудит-событий.
 	AuditURL string
+	// EnableHTTPS включает HTTPS сервер.
+	EnableHTTPS bool
 }
 
 func getConfigValue(envName string, flagValue *string) string {
@@ -42,7 +44,8 @@ func ParseAppConfig() *AppConfig {
 	urlPrefixFlag := flag.String("b", "http://localhost:8080/", "Префикс для коротких URL.")
 	fileFlag := flag.String("f", "urls.json", "Файл для сохранения URL.")
 	databaseDSNFlag := flag.String("d", "", "Строка подключения к базе данных. Пустое значение отключает БД.")
-	secretFlag := flag.String("s", "", "Секрет для HMAC.")
+	secretFlag := flag.String("secret", "", "Секрет для HMAC.")
+	enableHTTPSFlag := flag.Bool("s", false, "Включить HTTPS.")
 	auditFileFlag := flag.String("audit-file", "", "Путь к файлу для сохранения аудит событий.")
 	auditURLFlag := flag.String("audit-url", "", "Полный URL для аудит сервера.")
 	flag.Parse()
@@ -55,6 +58,11 @@ func ParseAppConfig() *AppConfig {
 	auditFile := getConfigValue("AUDIT_FILE", auditFileFlag)
 	auditURL := getConfigValue("AUDIT_URL", auditURLFlag)
 
+	enableHTTPS := *enableHTTPSFlag
+	if envValue, ok := os.LookupEnv("ENABLE_HTTPS"); ok {
+		enableHTTPS = envValue == "true" || envValue == "1" || envValue == "t"
+	}
+
 	return &AppConfig{
 		Addr:        host,
 		BaseURL:     urlPrefix,
@@ -63,5 +71,6 @@ func ParseAppConfig() *AppConfig {
 		Secret:      []byte(secret),
 		AuditFile:   auditFile,
 		AuditURL:    auditURL,
+		EnableHTTPS: enableHTTPS,
 	}
 }
