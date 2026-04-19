@@ -56,7 +56,7 @@ func main() {
 
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	ctx := context.Background()
-	appConfig := internal.ParseAppConfig()
+	appConfig := internal.ParseAppConfig(logger)
 
 	var (
 		pool *pgxpool.Pool
