@@ -16,7 +16,6 @@ const (
 	filePermissions = 0o644
 )
 
-// generate:reset
 // FileProvider реализует провайдера аудита через локальный файл.
 type FileProvider struct {
 	filePath string

@@ -12,7 +12,6 @@ var (
 	ErrCookieInvalid = errors.New("user ID cookie is invalid")
 )
 
-// generate:reset
 // UserService реализует логику простейшей авторизации пользователей.
 type UserService struct {
 	secret []byte
