@@ -3,6 +3,8 @@ package internal
 import (
 	"encoding/json"
 	"flag"
+	"fmt"
+	"net"
 	"os"
 
 	"github.com/rs/zerolog"
@@ -26,6 +28,8 @@ type AppConfig struct {
 	AuditURL string `json:"audit_url"`
 	// EnableHTTPS включает HTTPS сервер.
 	EnableHTTPS bool `json:"enable_https"`
+	// TrustedSubnet содержит в себе подсеть, которой доступен эндпоинт статистики.
+	TrustedSubnet *net.IPNet
 }
 
 func isFlagSet(name string) bool {
@@ -40,7 +44,7 @@ func isFlagSet(name string) bool {
 
 // ParseAppConfig парсит конфигурацию приложения из флагов командной строки,
 // переменных окружения и опционального JSON файла.
-func ParseAppConfig(logger zerolog.Logger) *AppConfig {
+func ParseAppConfig(logger zerolog.Logger) (*AppConfig, error) {
 	var configFilePath string
 	flag.StringVar(&configFilePath, "config", "", "Путь до JSON-файла с конфигурацией")
 
@@ -52,6 +56,7 @@ func ParseAppConfig(logger zerolog.Logger) *AppConfig {
 	enableHTTPSFlag := flag.Bool("s", false, "Включить HTTPS.")
 	auditFileFlag := flag.String("audit-file", "", "Путь к файлу для сохранения аудит событий.")
 	auditURLFlag := flag.String("audit-url", "", "Полный URL для аудит сервера.")
+	trustedSubnetFlag := flag.String("t", "", "Подсеть для эндпоинта статистики.")
 
 	flag.Parse()
 	if configPath, ok := os.LookupEnv("CONFIG"); ok {
@@ -101,6 +106,13 @@ func ParseAppConfig(logger zerolog.Logger) *AppConfig {
 	if isFlagSet("audit-url") {
 		config.AuditURL = *auditURLFlag
 	}
+	if isFlagSet("t") {
+		_, ipNet, err := net.ParseCIDR(*trustedSubnetFlag)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse trusted subnet: %w", err)
+		}
+		config.TrustedSubnet = ipNet
+	}
 
 	// Проверяем все переменные окружения
 	if envValue, ok := os.LookupEnv("SERVER_ADDRESS"); ok {
@@ -127,6 +139,13 @@ func ParseAppConfig(logger zerolog.Logger) *AppConfig {
 	if envValue, ok := os.LookupEnv("ENABLE_HTTPS"); ok {
 		config.EnableHTTPS = envValue == "true" || envValue == "1" || envValue == "t"
 	}
+	if envValue, ok := os.LookupEnv("TRUSTED_SUBNET"); ok {
+		_, ipNet, err := net.ParseCIDR(envValue)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse trusted subnet: %w", err)
+		}
+		config.TrustedSubnet = ipNet
+	}
 
-	return &config
+	return &config, nil
 }

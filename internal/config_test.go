@@ -13,7 +13,11 @@ func TestParseAppConfig(t *testing.T) {
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	os.Args = []string{"cmd"}
 
-	cfg := ParseAppConfig(zerolog.New(nil))
+	cfg, err := ParseAppConfig(zerolog.New(nil))
+	if err != nil {
+		t.Fatalf("unexpected configuration error: %w", err)
+	}
+
 	if cfg.Addr != "localhost:8080" {
 		t.Fatalf("expected default host, got %q", cfg.Addr)
 	}
@@ -30,7 +34,11 @@ func TestParseAppConfig_Override(t *testing.T) {
 	flag.CommandLine = flag.NewFlagSet(os.Args[0], flag.ContinueOnError)
 	os.Args = []string{"cmd", "-a", "0.0.0.0:9000"}
 
-	cfg := ParseAppConfig(zerolog.New(nil))
+	cfg, err := ParseAppConfig(zerolog.New(nil))
+	if err != nil {
+		t.Fatalf("unexpected configuration error: %w", err)
+	}
+
 	if cfg.Addr != "127.0.0.1:8080" {
 		t.Fatalf("expected env override, got %q", cfg.Addr)
 	}

@@ -56,13 +56,13 @@ func main() {
 
 	logger := zerolog.New(os.Stdout).With().Timestamp().Logger()
 	ctx := context.Background()
-	appConfig := internal.ParseAppConfig(logger)
 
-	var (
-		pool *pgxpool.Pool
-		err  error
-	)
+	appConfig, err := internal.ParseAppConfig(logger)
+	if err != nil {
+		logger.Fatal().Err(err).Msg("failed to parse configuration")
+	}
 
+	var pool *pgxpool.Pool
 	if appConfig.DatabaseDSN != "" {
 		if err := storage.RunMigrations(ctx, appConfig.DatabaseDSN, "migrations"); err != nil {
 			logger.Fatal().Err(err).Msg("failed to apply migrations")
