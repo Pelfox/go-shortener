@@ -59,6 +59,8 @@ type Storage interface {
 	Load() error
 	// Save сохраняет данные из хранилища в систему хранения (файл, БД, пр.).
 	Save() error
+	// GetCount возвращает количество записей (сокращений) из хранилища.
+	GetCount(ctx context.Context) (int, error)
 }
 
 // NewStorageFromConfig выбирает PostgreSQL-хранилище при заданной строке
@@ -190,7 +192,7 @@ func (s *InMemoryStorage) GetByDestination(_ context.Context, destination string
 	defer s.mutex.RUnlock()
 
 	for id, dest := range s.redirects {
-		if dest.Destination == destination {
+		if dest.Destination == destination && !dest.IsDeleted {
 			return id, nil
 		}
 	}
@@ -245,6 +247,13 @@ func (s *InMemoryStorage) Save() error {
 	return nil
 }
 
+func (s *InMemoryStorage) GetCount(_ context.Context) (int, error) {
+	s.mutex.RLock()
+	defer s.mutex.RUnlock()
+
+	return len(s.redirects), nil
+}
+
 // PostgresStorage реализует интерфейс Storage, используя PostgreSQL для
 // хранения коротких ссылок.
 type PostgresStorage struct {
@@ -276,7 +285,7 @@ func (s PostgresStorage) GetForUser(ctx context.Context) ([]ShortenedLink, error
 	}
 
 	rows, err := s.pool.Query(ctx,
-		`SELECT slug, destination FROM links WHERE user_id = $1`,
+		`SELECT slug, destination FROM links WHERE user_id = $1 AND is_deleted = false`,
 		userID,
 	)
 	if err != nil {
@@ -326,20 +335,28 @@ func (s PostgresStorage) Store(ctx context.Context, id string, destination strin
 }
 
 func (s PostgresStorage) Get(ctx context.Context, id string) (string, error) {
-	var destination string
-	err := s.pool.QueryRow(ctx, "SELECT destination FROM links WHERE slug = $1", id).Scan(&destination)
+	var (
+		destination string
+		isDeleted   bool
+	)
+	err := s.pool.QueryRow(ctx, "SELECT destination, is_deleted FROM links WHERE slug = $1", id).
+		Scan(&destination, &isDeleted)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrNotFound
 		}
 		return "", fmt.Errorf("could not get link: %w", err)
 	}
+	if isDeleted {
+		return "", ErrDeleted
+	}
 	return destination, nil
 }
 
 func (s PostgresStorage) GetByDestination(ctx context.Context, destination string) (string, error) {
 	var slug string
-	err := s.pool.QueryRow(ctx, "SELECT slug FROM links WHERE destination = $1", destination).Scan(&slug)
+	err := s.pool.QueryRow(ctx, "SELECT slug FROM links WHERE destination = $1 AND is_deleted = false", destination).
+		Scan(&slug)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return "", ErrNotFound
@@ -355,4 +372,13 @@ func (s PostgresStorage) Load() error {
 
 func (s PostgresStorage) Save() error {
 	return nil
+}
+
+func (s PostgresStorage) GetCount(ctx context.Context) (int, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, "SELECT COUNT(id) FROM links").Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("failed to query links count: %w", err)
+	}
+	return count, nil
 }

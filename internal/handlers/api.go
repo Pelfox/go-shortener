@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 
@@ -16,16 +17,22 @@ import (
 type APIHandler struct {
 	shortenerService *services.ShortenerService
 	logger           zerolog.Logger
+	trustedSubnet    *net.IPNet
+	userService      *services.UserService
 }
 
 // NewAPIHandler создаёт новый APIHandler с дочерним логгером.
 func NewAPIHandler(
 	shortenerService *services.ShortenerService,
 	parentLogger zerolog.Logger,
+	trustedSubnet *net.IPNet,
+	userService *services.UserService,
 ) *APIHandler {
 	return &APIHandler{
 		shortenerService: shortenerService,
 		logger:           parentLogger.With().Str("handler", "api").Logger(),
+		trustedSubnet:    trustedSubnet,
+		userService:      userService,
 	}
 }
 
@@ -211,4 +218,41 @@ func (h *APIHandler) DeleteBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusAccepted)
+}
+
+// GetStats возвращает статистику сервиса.
+func (h *APIHandler) GetStats(w http.ResponseWriter, r *http.Request) {
+	realIP := net.ParseIP(r.Header.Get("X-Real-IP"))
+	if realIP == nil {
+		h.logger.Error().Msg("failed to parse incoming IP")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	if h.trustedSubnet == nil || !h.trustedSubnet.Contains(realIP) {
+		http.Error(w, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+		return
+	}
+
+	urlsCount, err := h.shortenerService.GetCount(r.Context())
+	if err != nil {
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	responseObject := schemas.StatsResponse{
+		URLs:  urlsCount,
+		Users: h.userService.GetUsersCount(),
+	}
+
+	responseBody, err := json.Marshal(responseObject)
+	if err != nil {
+		h.logger.Error().Err(err).Msg("failed to marshal the response body")
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write(responseBody)
 }

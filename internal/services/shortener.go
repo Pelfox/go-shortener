@@ -30,6 +30,8 @@ var (
 	ErrDestinationNotFound = errors.New("no destination for this short ID")
 	// ErrDeleted указывает на то что данная ссылка была помечена как удалённая.
 	ErrDeleted = errors.New("this link has been deleted")
+	// ErrCountQueryFailed указывает на невозможность получения количества ссылок.
+	ErrCountQueryFailed = errors.New("failed to query the amount of links")
 )
 
 type deleteTask struct {
@@ -232,4 +234,14 @@ func (s *ShortenerService) DeleteBatch(ctx context.Context, shortIDs []string) e
 	}()
 
 	return nil
+}
+
+// GetCount возвращает общее количество ссылок из хранилища.
+func (s *ShortenerService) GetCount(ctx context.Context) (int, error) {
+	count, err := s.storage.GetCount(ctx)
+	if err != nil {
+		s.logger.Error().Err(err).Msg("failed to get links count")
+		return 0, ErrCountQueryFailed
+	}
+	return count, nil
 }
