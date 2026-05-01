@@ -10,6 +10,8 @@ require (
 	github.com/kisielk/errcheck v1.10.0
 	github.com/rs/zerolog v1.35.0
 	golang.org/x/tools v0.44.0
+	google.golang.org/grpc v1.74.2
+	google.golang.org/protobuf v1.36.7
 	honnef.co/go/tools v0.7.0
 )
 
@@ -23,7 +25,9 @@ require (
 	github.com/mattn/go-isatty v0.0.21 // indirect
 	golang.org/x/exp/typeparams v0.0.0-20260410095643-746e56fc9e2f // indirect
 	golang.org/x/mod v0.35.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/sync v0.20.0 // indirect
 	golang.org/x/sys v0.43.0 // indirect
 	golang.org/x/text v0.36.0 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20250818200422-3122310a409c // indirect
 )
