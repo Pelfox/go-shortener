@@ -45,9 +45,8 @@ func prepareClient(t *testing.T) shortenerpb.ShortenerServiceClient {
 		listener.Close()
 	})
 
-	conn, err := grpc.DialContext(
-		context.Background(),
-		"bufnet",
+	conn, err := grpc.NewClient(
+		"passthrough:///bufnet",
 		grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) {
 			return listener.Dial()
 		}),
