@@ -1,5 +1,7 @@
 {
   "server_address": "localhost:8080",
+  "grpc_server_address": "localhost:3200",
   "base_url": "http://localhost:8080/",
-  "enable_https": false
+  "enable_https": false,
+  "enable_grpc_tls": false
 }

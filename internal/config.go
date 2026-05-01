@@ -14,6 +14,8 @@ import (
 type AppConfig struct {
 	// Addr это адрес для HTTP-сервера.
 	Addr string `json:"server_address"`
+	// GRPCAddr это адрес для gRPC-сервера.
+	GRPCAddr string `json:"grpc_server_address"`
 	// BaseURL это базовый URL для коротких ссылок.
 	BaseURL string `json:"base_url"`
 	// FilePath это путь к файлу для хранения ссылок.
@@ -28,6 +30,8 @@ type AppConfig struct {
 	AuditURL string `json:"audit_url"`
 	// EnableHTTPS включает HTTPS сервер.
 	EnableHTTPS bool `json:"enable_https"`
+	// EnableGRPCTLS включает TLS для gRPC-сервера.
+	EnableGRPCTLS bool `json:"enable_grpc_tls"`
 	// TrustedSubnet содержит в себе подсеть, которой доступен эндпоинт статистики.
 	TrustedSubnet *net.IPNet
 }
@@ -49,11 +53,13 @@ func ParseAppConfig(logger zerolog.Logger) (*AppConfig, error) {
 	flag.StringVar(&configFilePath, "config", "", "Путь до JSON-файла с конфигурацией")
 
 	hostFlag := flag.String("a", "localhost:8080", "Адрес, на котором будет запущен HTTP сервер.")
+	grpcHostFlag := flag.String("g", "localhost:3200", "Адрес, на котором будет запущен gRPC сервер.")
 	urlPrefixFlag := flag.String("b", "http://localhost:8080/", "Префикс для коротких URL.")
 	fileFlag := flag.String("f", "urls.json", "Файл для сохранения URL.")
 	databaseDSNFlag := flag.String("d", "", "Строка подключения к базе данных. Пустое значение отключает БД.")
 	secretFlag := flag.String("secret", "", "Секрет для HMAC.")
 	enableHTTPSFlag := flag.Bool("s", false, "Включить HTTPS.")
+	enableGRPCTLSFlag := flag.Bool("grpc-tls", false, "Включить TLS для gRPC.")
 	auditFileFlag := flag.String("audit-file", "", "Путь к файлу для сохранения аудит событий.")
 	auditURLFlag := flag.String("audit-url", "", "Полный URL для аудит сервера.")
 	trustedSubnetFlag := flag.String("t", "", "Подсеть для эндпоинта статистики.")
@@ -85,6 +91,9 @@ func ParseAppConfig(logger zerolog.Logger) (*AppConfig, error) {
 	if isFlagSet("a") {
 		config.Addr = *hostFlag
 	}
+	if isFlagSet("g") {
+		config.GRPCAddr = *grpcHostFlag
+	}
 	if isFlagSet("b") {
 		config.BaseURL = *urlPrefixFlag
 	}
@@ -99,6 +108,9 @@ func ParseAppConfig(logger zerolog.Logger) (*AppConfig, error) {
 	}
 	if isFlagSet("s") {
 		config.EnableHTTPS = *enableHTTPSFlag
+	}
+	if isFlagSet("grpc-tls") {
+		config.EnableGRPCTLS = *enableGRPCTLSFlag
 	}
 	if isFlagSet("audit-file") {
 		config.AuditFile = *auditFileFlag
@@ -117,6 +129,9 @@ func ParseAppConfig(logger zerolog.Logger) (*AppConfig, error) {
 	// Проверяем все переменные окружения
 	if envValue, ok := os.LookupEnv("SERVER_ADDRESS"); ok {
 		config.Addr = envValue
+	}
+	if envValue, ok := os.LookupEnv("GRPC_SERVER_ADDRESS"); ok {
+		config.GRPCAddr = envValue
 	}
 	if envValue, ok := os.LookupEnv("BASE_URL"); ok {
 		config.BaseURL = envValue
@@ -139,12 +154,28 @@ func ParseAppConfig(logger zerolog.Logger) (*AppConfig, error) {
 	if envValue, ok := os.LookupEnv("ENABLE_HTTPS"); ok {
 		config.EnableHTTPS = envValue == "true" || envValue == "1" || envValue == "t"
 	}
+	if envValue, ok := os.LookupEnv("ENABLE_GRPC_TLS"); ok {
+		config.EnableGRPCTLS = envValue == "true" || envValue == "1" || envValue == "t"
+	}
 	if envValue, ok := os.LookupEnv("TRUSTED_SUBNET"); ok {
 		_, ipNet, err := net.ParseCIDR(envValue)
 		if err != nil {
 			return nil, fmt.Errorf("failed to parse trusted subnet: %w", err)
 		}
 		config.TrustedSubnet = ipNet
+	}
+
+	if config.Addr == "" {
+		config.Addr = *hostFlag
+	}
+	if config.GRPCAddr == "" {
+		config.GRPCAddr = *grpcHostFlag
+	}
+	if config.BaseURL == "" {
+		config.BaseURL = *urlPrefixFlag
+	}
+	if config.FilePath == "" {
+		config.FilePath = *fileFlag
 	}
 
 	return &config, nil

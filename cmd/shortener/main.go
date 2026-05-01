@@ -78,7 +78,7 @@ func main() {
 	storageInstance := storage.NewStorageFromConfig(logger, appConfig.FilePath, pool)
 	server := internal.NewServer(appConfig, logger, storageInstance, pool)
 
-	if err := server.ServeHTTP(); err != nil {
+	if err := server.Serve(); err != nil {
 		logger.Fatal().Err(err).Msg("failed to start the server")
 	}
 }
