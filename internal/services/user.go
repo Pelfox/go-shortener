@@ -2,6 +2,7 @@ package services
 
 import (
 	"errors"
+	"sync/atomic"
 
 	"github.com/Pelfox/go-shortener/pkg"
 )
@@ -14,7 +15,8 @@ var (
 
 // UserService реализует логику простейшей авторизации пользователей.
 type UserService struct {
-	secret []byte
+	secret     []byte
+	usersCount atomic.Uint64 // Простейший счётчик пользователей в сервисе.
 }
 
 // NewUserService создаёт и возвращает новый объект UserService.
@@ -32,7 +34,14 @@ func (s *UserService) CreateUserCookie() (string, string) {
 	signedUserID := pkg.SignUserCookie(userID, s.secret)
 
 	cookieValue := userID + "." + signedUserID
+	s.usersCount.Add(1)
+
 	return userID, cookieValue
+}
+
+// GetUsersCount возвращает общее количество пользователей в сервисе.
+func (s *UserService) GetUsersCount() int {
+	return int(s.usersCount.Load())
 }
 
 // VerifyUserCookieValue проверяет, что указанное значение Cookie является

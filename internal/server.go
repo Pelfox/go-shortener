@@ -82,11 +82,17 @@ func NewServer(
 	plainHandler := handlers.NewPlainHandler(shortenerService, logger)
 	router.Post("/", plainHandler.Create)
 
-	apiHandler := handlers.NewAPIHandler(shortenerService, logger)
+	apiHandler := handlers.NewAPIHandler(
+		shortenerService,
+		logger,
+		config.TrustedSubnet,
+		userService,
+	)
 	router.Route("/api", func(r chi.Router) {
 		r.Post("/shorten", apiHandler.Create)
 		r.Post("/shorten/batch", apiHandler.CreateBatch)
 		r.Get("/user/urls", apiHandler.GetUserLinks)
+		r.Get("/internal/stats", apiHandler.GetStats)
 		r.Delete("/user/urls", apiHandler.DeleteBatch)
 	})
 
